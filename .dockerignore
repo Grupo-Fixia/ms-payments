@@ -1,0 +1,8 @@
+.git
+.gitignore
+target/
+build/
+.idea/
+.vscode/
+.dart_tool/
+*.log
