@@ -1,8 +1,7 @@
 .git
 .gitignore
-target/
-build/
+bin/
+obj/
+*.log
 .idea/
 .vscode/
-.dart_tool/
-*.log

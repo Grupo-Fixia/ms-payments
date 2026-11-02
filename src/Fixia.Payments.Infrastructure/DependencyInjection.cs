@@ -1,0 +1,48 @@
+using Fixia.Payments.Application.Common.Interfaces;
+using Fixia.Payments.Infrastructure.Gateways;
+using Fixia.Payments.Infrastructure.Messaging;
+using Fixia.Payments.Infrastructure.Persistence;
+using Fixia.Payments.Infrastructure.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Fixia.Payments.Infrastructure;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddInfrastructureServices(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString("PaymentsDb")
+            ?? configuration["SPRING_DATASOURCE_URL"]?.Replace("jdbc:postgresql://", "Host=")
+            ?? "Host=localhost;Port=5433;Database=payments_db;Username=user;Password=password";
+
+        // Convertir formato jdbc si viene de variables Spring o compose legacy
+        if (connectionString.StartsWith("jdbc:postgresql://"))
+        {
+            var raw = connectionString["jdbc:postgresql://".Length..];
+            var parts = raw.Split('/');
+            var hostPort = parts[0].Split(':');
+            var host = hostPort[0];
+            var port = hostPort.Length > 1 ? hostPort[1] : "5432";
+            var db = parts.Length > 1 ? parts[1] : "payments_db";
+            var user = configuration["SPRING_DATASOURCE_USERNAME"] ?? configuration["POSTGRES_USER"] ?? "user";
+            var pass = configuration["SPRING_DATASOURCE_PASSWORD"] ?? configuration["POSTGRES_PASSWORD"] ?? "password";
+            connectionString = $"Host={host};Port={port};Database={db};Username={user};Password={pass}";
+        }
+
+        services.AddDbContext<PaymentsDbContext>(options =>
+            options.UseNpgsql(connectionString, b =>
+                b.MigrationsAssembly(typeof(PaymentsDbContext).Assembly.FullName)));
+
+        services.AddScoped<IPaymentRepository, PaymentRepository>();
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<IPaymentGateway, MockPaymentGateway>();
+        services.AddSingleton<IEventPublisher, KafkaEventPublisher>();
+
+        return services;
+    }
+}
+
