@@ -1,7 +1,7 @@
 .git
 .gitignore
-bin/
-obj/
+**/bin/
+**/obj/
 *.log
 .idea/
 .vscode/

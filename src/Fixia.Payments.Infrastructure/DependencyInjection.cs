@@ -2,10 +2,12 @@ using Fixia.Payments.Application.Common.Interfaces;
 using Fixia.Payments.Infrastructure.Gateways;
 using Fixia.Payments.Infrastructure.Messaging;
 using Fixia.Payments.Infrastructure.Persistence;
+using Fixia.Payments.Infrastructure.Persistence.Outbox;
 using Fixia.Payments.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Fixia.Payments.Infrastructure;
 
@@ -40,7 +42,16 @@ public static class DependencyInjection
         services.AddScoped<IPaymentRepository, PaymentRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IPaymentGateway, MockPaymentGateway>();
-        services.AddSingleton<IEventPublisher, KafkaEventPublisher>();
+
+        // Outbox transaccional (GC-477): el servicio escribe el evento en la base y el relay lo publica en Kafka.
+        services.AddScoped<IBusinessEventOutbox, OutboxWriter>();
+        services.AddSingleton<IMessagePublisher, KafkaEventPublisher>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.Configure<OutboxOptions>(configuration.GetSection(OutboxOptions.SectionName));
+        if (configuration.GetValue($"{OutboxOptions.SectionName}:{nameof(OutboxOptions.RelayEnabled)}", true))
+        {
+            services.AddHostedService<OutboxRelay>();
+        }
 
         return services;
     }
