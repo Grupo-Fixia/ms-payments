@@ -67,6 +67,17 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<Program>
 
     public RSA SigningKey => _signingKey;
 
+    /// <summary>
+    /// La base en memoria no aplica migraciones: <c>EnsureCreated</c> carga los datos sembrados por el modelo (la cuenta
+    /// de Fixia y la tarifa inicial de 15 %).
+    /// </summary>
+    public PaymentsApiFactory Seeded()
+    {
+        using var scope = Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<PaymentsDbContext>().Database.EnsureCreated();
+        return this;
+    }
+
     public HttpClient ClientWithToken(string token)
     {
         var client = CreateClient();
