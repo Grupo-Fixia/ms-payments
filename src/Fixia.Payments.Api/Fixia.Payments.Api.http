@@ -1,0 +1,6 @@
+@Fixia.Payments.Api_HostAddress = http://localhost:5257
+
+GET {{Fixia.Payments.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
