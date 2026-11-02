@@ -204,7 +204,9 @@ public class PaymentsApiSecurityTests : IClassFixture<PaymentsApiFactory>
         var path = $"/api/payments/{payment.Id}/refund?reason=servicio%20cancelado";
 
         var byClient = await _factory.ClientWithToken(_factory.Token(clientId, "ROLE_CLIENT")).PostAsync(path, null);
-        var byAdmin = await _factory.ClientWithToken(_factory.Token(Guid.NewGuid(), "ROLE_ADMIN")).PostAsync(path, null);
+        var admin = _factory.ClientWithToken(_factory.Token(Guid.NewGuid(), "ROLE_ADMIN"));
+        admin.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        var byAdmin = await admin.PostAsync(path, null);
 
         byClient.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         byClient.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");

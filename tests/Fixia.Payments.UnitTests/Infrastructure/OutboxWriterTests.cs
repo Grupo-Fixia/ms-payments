@@ -75,7 +75,7 @@ public class OutboxWriterTests
         payment.MarkAsCompleted("GW-1");
         await writer.EnqueueAsync(PaymentEvents.PaymentCompleted(payment, new EventActor(payment.ClientId, "CLIENT")));
         payment.Refund("REF-1");
-        await writer.EnqueueAsync(PaymentEvents.PaymentRefunded(payment, new EventActor(Guid.NewGuid(), "ADMIN"), "REF-1", "prueba"));
+        await writer.EnqueueAsync(PaymentEvents.PaymentRefunded(payment, new EventActor(Guid.NewGuid(), "ADMIN"), "REF-1", "prueba", PaymentEvents.RefundKinds.Gateway));
         await db.SaveChangesAsync();
 
         // Assert

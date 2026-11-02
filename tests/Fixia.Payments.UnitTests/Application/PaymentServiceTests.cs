@@ -238,42 +238,4 @@ public class PaymentServiceTests
         // Assert
         await action.Should().ThrowAsync<PaymentNotFoundException>();
     }
-
-    [Fact]
-    public async Task RefundPaymentAsync_WhenPaymentIsCompleted_ShouldRefundSuccessfully()
-    {
-        // Arrange
-        var payment = new Payment(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 100000m, "COP", PaymentMethod.CreditCard);
-        payment.MarkAsCompleted("TX-SUCCESS");
-        GivenPayment(payment);
-
-        _paymentGatewayMock.Setup(g => g.ProcessRefundAsync(payment.Id, "TX-SUCCESS", payment.Amount, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PaymentGatewayResult(true, "REF-APPROVED-999"));
-
-        // Act
-        var result = await _sut.RefundPaymentAsync(payment.Id, Admin(), "Cliente canceló servicio");
-
-        // Assert
-        result.Status.Should().Be(PaymentStatus.Refunded);
-        var refunded = _enqueued.Should().ContainSingle().Subject;
-        refunded.EventType.Should().Be(PaymentEvents.Refunded);
-        refunded.Actor.Role.Should().Be("ADMIN");
-    }
-
-    [Fact]
-    public async Task RefundPaymentAsync_WhenRequesterIsNotAdmin_ShouldBeDenied()
-    {
-        // Arrange
-        var payment = new Payment(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 100000m, "COP", PaymentMethod.CreditCard);
-        payment.MarkAsCompleted("TX-SUCCESS");
-        GivenPayment(payment);
-
-        // Act
-        var action = () => _sut.RefundPaymentAsync(payment.Id, Client(payment.ClientId), "quiero mi dinero");
-
-        // Assert
-        await action.Should().ThrowAsync<PaymentAccessDeniedException>();
-        payment.Status.Should().Be(PaymentStatus.Completed);
-        _paymentGatewayMock.VerifyNoOtherCalls();
-    }
 }
