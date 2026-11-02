@@ -59,6 +59,20 @@ public class GlobalExceptionMiddleware
                 _logger.LogWarning("Operación de pago no permitida: {Message}", accessDenied.Message);
                 break;
 
+            // GC-480: el movimiento dejaría un saldo negativo, o no hay tarifa de comisión vigente.
+            case InsufficientBalanceException or CommissionRuleNotFoundException:
+                statusCode = HttpStatusCode.Conflict;
+                title = exception is InsufficientBalanceException ? "Saldo insuficiente" : "Sin tarifa de comisión vigente";
+                detail = exception.Message;
+                _logger.LogWarning("Conflicto de billetera: {Message}", exception.Message);
+                break;
+
+            case InvalidQueryException invalidQuery:
+                statusCode = HttpStatusCode.BadRequest;
+                title = "Parámetros de consulta no válidos";
+                detail = invalidQuery.Message;
+                break;
+
             case PaymentConflictException conflict:
                 statusCode = HttpStatusCode.Conflict;
                 title = "Conflicto con un pago existente";

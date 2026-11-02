@@ -22,6 +22,59 @@ namespace Fixia.Payments.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Fixia.Payments.Domain.Entities.CommissionRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("description");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(5, 4)
+                        .HasColumnType("numeric(5,4)")
+                        .HasColumnName("rate");
+
+                    b.Property<DateTime>("ValidFrom")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("valid_from");
+
+                    b.Property<DateTime?>("ValidTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("valid_to");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ValidFrom")
+                        .IsUnique()
+                        .HasDatabaseName("ux_commission_rules_valid_from");
+
+                    b.ToTable("commission_rules", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_commission_rules_rate", "rate > 0 AND rate < 1");
+
+                            t.HasCheckConstraint("ck_commission_rules_validity", "valid_to IS NULL OR valid_to > valid_from");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("00000000-0000-0000-0000-000000000015"),
+                            CreatedAt = new DateTime(2026, 11, 2, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Tarifa inicial aprobada por el PO (GC-476): 15 % a cargo del cliente",
+                            Rate = 0.15m,
+                            ValidFrom = new DateTime(2026, 11, 2, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
+                });
+
             modelBuilder.Entity("Fixia.Payments.Domain.Entities.Payment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -33,9 +86,32 @@ namespace Fixia.Payments.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric(18,2)")
                         .HasColumnName("amount");
 
+                    b.Property<decimal?>("BaseAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("base_amount");
+
                     b.Property<Guid>("ClientId")
                         .HasColumnType("uuid")
                         .HasColumnName("client_id");
+
+                    b.Property<decimal?>("CommissionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("commission_amount");
+
+                    b.Property<decimal?>("CommissionRate")
+                        .HasPrecision(5, 4)
+                        .HasColumnType("numeric(5,4)")
+                        .HasColumnName("commission_rate");
+
+                    b.Property<Guid?>("CommissionRuleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("commission_rule_id");
+
+                    b.Property<Guid?>("ContractId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("contract_id");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -92,11 +168,19 @@ namespace Fixia.Payments.Infrastructure.Persistence.Migrations
                     b.HasIndex("ClientId")
                         .HasDatabaseName("ix_payments_client_id");
 
+                    b.HasIndex("CommissionRuleId")
+                        .HasDatabaseName("ix_payments_commission_rule_id");
+
                     b.HasIndex("ServiceRequestId")
                         .IsUnique()
                         .HasDatabaseName("ux_payments_service_request_id");
 
-                    b.ToTable("payments", (string)null);
+                    b.ToTable("payments", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_payments_amount_positive", "amount > 0");
+
+                            t.HasCheckConstraint("ck_payments_breakdown", "(base_amount IS NULL AND commission_amount IS NULL) OR (base_amount > 0 AND commission_amount >= 0 AND amount = base_amount + commission_amount)");
+                        });
                 });
 
             modelBuilder.Entity("Fixia.Payments.Domain.Entities.PaymentTransaction", b =>
@@ -145,6 +229,139 @@ namespace Fixia.Payments.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_payment_transactions_payment_id");
 
                     b.ToTable("payment_transactions", (string)null);
+                });
+
+            modelBuilder.Entity("Fixia.Payments.Domain.Entities.Wallet", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("AvailableBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("available_balance");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("currency");
+
+                    b.Property<decimal>("HeldBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("held_balance");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_id");
+
+                    b.Property<string>("OwnerType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("owner_type");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "Currency")
+                        .IsUnique()
+                        .HasDatabaseName("ux_wallets_owner_currency");
+
+                    b.ToTable("wallets", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_wallets_available_non_negative", "available_balance >= 0");
+
+                            t.HasCheckConstraint("ck_wallets_held_non_negative", "held_balance >= 0");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("00000000-0000-0000-0000-0000000f1a10"),
+                            AvailableBalance = 0m,
+                            CreatedAt = new DateTime(2026, 11, 2, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Currency = "COP",
+                            HeldBalance = 0m,
+                            OwnerId = new Guid("00000000-0000-0000-0000-00000000f1a1"),
+                            OwnerType = "Platform"
+                        });
+                });
+
+            modelBuilder.Entity("Fixia.Payments.Domain.Entities.WalletEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<decimal>("AvailableAfter")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("available_after");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal>("HeldAfter")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("held_after");
+
+                    b.Property<Guid?>("PaymentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("payment_id");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("reference");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("type");
+
+                    b.Property<Guid>("WalletId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("wallet_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PaymentId")
+                        .HasDatabaseName("ix_wallet_entries_payment_id");
+
+                    b.HasIndex("WalletId", "CreatedAt", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_wallet_entries_wallet_created");
+
+                    b.ToTable("wallet_entries", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_wallet_entries_amount_positive", "amount > 0");
+
+                            t.HasCheckConstraint("ck_wallet_entries_balances_non_negative", "available_after >= 0 AND held_after >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Fixia.Payments.Infrastructure.Persistence.Outbox.OutboxEvent", b =>
@@ -234,6 +451,15 @@ namespace Fixia.Payments.Infrastructure.Persistence.Migrations
                     b.ToTable("outbox_events", (string)null);
                 });
 
+            modelBuilder.Entity("Fixia.Payments.Domain.Entities.Payment", b =>
+                {
+                    b.HasOne("Fixia.Payments.Domain.Entities.CommissionRule", null)
+                        .WithMany()
+                        .HasForeignKey("CommissionRuleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_payments_commission_rule");
+                });
+
             modelBuilder.Entity("Fixia.Payments.Domain.Entities.PaymentTransaction", b =>
                 {
                     b.HasOne("Fixia.Payments.Domain.Entities.Payment", "Payment")
@@ -243,6 +469,22 @@ namespace Fixia.Payments.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Payment");
+                });
+
+            modelBuilder.Entity("Fixia.Payments.Domain.Entities.WalletEntry", b =>
+                {
+                    b.HasOne("Fixia.Payments.Domain.Entities.Payment", null)
+                        .WithMany()
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_wallet_entries_payment");
+
+                    b.HasOne("Fixia.Payments.Domain.Entities.Wallet", null)
+                        .WithMany()
+                        .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_wallet_entries_wallet");
                 });
 
             modelBuilder.Entity("Fixia.Payments.Domain.Entities.Payment", b =>

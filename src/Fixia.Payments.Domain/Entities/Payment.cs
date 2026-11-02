@@ -20,7 +20,45 @@ public class Payment
     public DateTime CreatedAt { get; private set; }
     public DateTime? UpdatedAt { get; private set; }
 
+    // Desglose del pago con billetera (GC-480). Null en los pagos registrados antes por la ruta interna.
+
+    /// <summary>Contrato de ms-services que originó el pago.</summary>
+    public Guid? ContractId { get; private set; }
+
+    /// <summary>Precio del prestador: lo que recibe íntegro al cerrar.</summary>
+    public decimal? BaseAmount { get; private set; }
+
+    /// <summary>Comisión de Fixia, a cargo del cliente. <c>Amount = BaseAmount + CommissionAmount</c>.</summary>
+    public decimal? CommissionAmount { get; private set; }
+
+    /// <summary>Tarifa aplicada y regla de la que salió, para reconstruir el cálculo aunque la tarifa cambie después.</summary>
+    public decimal? CommissionRate { get; private set; }
+
+    public Guid? CommissionRuleId { get; private set; }
+
     public IReadOnlyCollection<PaymentTransaction> Transactions => _transactions.AsReadOnly();
+
+    /// <summary>
+    /// Pago de un servicio contratado con billetera (GC-480/GC-484): <c>Amount</c> es el total que paga el cliente
+    /// (precio + comisión) y queda el desglose con la regla aplicada.
+    /// </summary>
+    public static Payment ForContract(Guid serviceRequestId, Guid contractId, Guid clientId, Guid providerId,
+        CommissionQuote quote)
+    {
+        if (contractId == Guid.Empty)
+            throw new PaymentDomainException("El ContractId no puede estar vacío.");
+
+        var payment = new Payment(serviceRequestId, clientId, providerId, quote.Total, quote.Currency,
+            PaymentMethod.Wallet)
+        {
+            ContractId = contractId,
+            BaseAmount = quote.Price,
+            CommissionAmount = quote.Commission,
+            CommissionRate = quote.Rate,
+            CommissionRuleId = quote.RuleId
+        };
+        return payment;
+    }
 
     // Private constructor for EF Core
     private Payment() { }

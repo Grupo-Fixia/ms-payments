@@ -14,6 +14,8 @@ builder.Logging.AddConsole();
 // 1. Inyección de dependencias de capas
 builder.Services.AddInfrastructureServices(builder.Configuration);
 builder.Services.AddScoped<IPaymentService, PaymentService>();
+builder.Services.AddScoped<IWalletService, WalletService>();
+builder.Services.AddScoped<ICommissionService, CommissionService>();
 
 // 2. Seguridad: token de ms-users en /api/payments y clave interna en /internal (GC-477)
 builder.Services.AddFixiaSecurity(builder.Configuration, builder.Environment);
