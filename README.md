@@ -31,6 +31,8 @@ ms-payments/
 | `POST` | `/api/payments/{id}/refund` | `ROLE_ADMIN` | Ejecuta el reembolso de un pago previamente completado. |
 | `GET` | `/api/payments/wallets/me` | `ROLE_CLIENT`, `ROLE_PROFESSIONAL`, `ROLE_COMPANY` | Saldo disponible y retenido de mi billetera simulada; si no existe, se crea en cero (GC-481). |
 | `GET` | `/api/payments/wallets/me/entries?limit=&cursor=` | `ROLE_CLIENT`, `ROLE_PROFESSIONAL`, `ROLE_COMPANY` | Movimientos de mi billetera, del más reciente al más antiguo; `limit` de 1 a 50 (20 por defecto) y `nextCursor` para la página siguiente (GC-481). |
+| `POST` | `/api/payments/wallets/me/top-ups` | `ROLE_CLIENT` | Recarga simulada (`{"amount": 50000}`) con la cabecera `Idempotency-Key`; 201 con el movimiento y los saldos (GC-482). |
+| `POST` | `/api/payments/wallets/me/withdrawals` | `ROLE_PROFESSIONAL`, `ROLE_COMPANY` | Retiro simulado del saldo disponible (nunca del retenido), con `Idempotency-Key` (GC-483). |
 | `GET` | `/api/payments/commission-quote?amount=&currency=` | Cualquier usuario autenticado | Precio, comisión de Fixia y total con la tarifa vigente, para mostrarlo antes de aceptar la cotización (GC-471, criterio 1). No guarda nada. |
 | `GET` | `/api/payments/health` | Público | Health check del microservicio (también `/actuator/health`). |
 | `GET` | `/api/payments/swagger` | Público | Documentación interactiva OpenAPI/Swagger (botón *Authorize* para el token). |
@@ -46,7 +48,18 @@ Modelo aprobado por el PO en GC-476: **todo el dinero es virtual**, no hay trans
 - **`commission_rules`:** tarifas con vigencia; la inicial es **15 %**, a cargo del cliente, encima del precio. Para cambiarla se cierra la vigencia de la actual y se agrega otra, sin tocar el código. La comisión se redondea a dos decimales (0,005 sube) y siempre `total = precio + comisión`.
 - **`payments`:** gana el desglose para los pagos con billetera (`contract_id`, `base_amount`, `commission_amount`, `commission_rate`, `commission_rule_id`), con un `CHECK` que exige `amount = base_amount + commission_amount`. Los pagos registrados antes quedan con el desglose vacío.
 
-Los movimientos los crearán la recarga y el retiro (GC-482, GC-483), la retención y el cobro (GC-484, GC-485) y la liberación y el reembolso (GC-487).
+Los movimientos los crean la recarga y el retiro (GC-482, GC-483) y los crearán la retención y el cobro (GC-484, GC-485) y la liberación y el reembolso (GC-487).
+
+### Recarga y retiro simulados (GC-482, GC-483)
+
+- Pasan por el **mock de pasarela**: aprueba todo lo que no supere `PaymentGateway__Mock__RejectAmountsAbove` (10 000 000 COP por defecto) y rechaza lo demás con **402**, sin cambiar el saldo. Así se puede demostrar un rechazo.
+- **`Idempotency-Key` obligatoria** (hasta 100 caracteres visibles, por ejemplo un UUID nuevo por operación). Es por usuario y operación, y se guarda en `idempotency_keys` en la misma transacción que el movimiento:
+  - misma clave y mismo cuerpo → la misma respuesta 201, con `Idempotent-Replayed: true`, sin recargar ni retirar otra vez;
+  - misma clave con otro importe → **422**;
+  - si la operación falla (rechazo, saldo insuficiente, choque de concurrencia), no queda nada guardado y se puede reintentar con la misma clave;
+  - dos peticiones simultáneas con la misma clave ejecutan la operación una sola vez.
+- El retiro solo usa el saldo **disponible**; si no alcanza responde **409** antes de llamar a la pasarela.
+- Dos operaciones simultáneas sobre la misma billetera con claves distintas: una gana y la otra responde **409** (bloqueo optimista); se reintenta con su misma clave.
 
 ## 🔐 Seguridad (GC-477)
 
@@ -73,7 +86,7 @@ Los movimientos los crearán la recarga y el retiro (GC-482, GC-483), la retenci
 
 ## 🗄️ Migraciones (GC-477)
 
-El esquema se crea con **migraciones versionadas de EF Core** (`src/Fixia.Payments.Infrastructure/Persistence/Migrations`), ya no con `EnsureCreated()`. La primera, `InitialCreate`, crea `payments` (con un pago por solicitud), `payment_transactions` y `outbox_events`; la segunda, `AddWallets` (GC-480), crea `wallets`, `wallet_entries` y `commission_rules`, siembra la cuenta de Fixia y la tarifa de 15 %, y agrega el desglose a `payments`.
+El esquema se crea con **migraciones versionadas de EF Core** (`src/Fixia.Payments.Infrastructure/Persistence/Migrations`), ya no con `EnsureCreated()`. La primera, `InitialCreate`, crea `payments` (con un pago por solicitud), `payment_transactions` y `outbox_events`; la segunda, `AddWallets` (GC-480), crea `wallets`, `wallet_entries` y `commission_rules`, siembra la cuenta de Fixia y la tarifa de 15 %, y agrega el desglose a `payments`; la tercera, `AddIdempotencyKeys` (GC-482/483), crea `idempotency_keys`.
 
 ```bash
 dotnet tool restore                                   # instala dotnet-ef 8.0.11 (herramienta local)
