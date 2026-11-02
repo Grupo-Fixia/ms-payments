@@ -2,6 +2,7 @@ using Fixia.Payments.Application.Common.Interfaces;
 using Fixia.Payments.Infrastructure.Gateways;
 using Fixia.Payments.Infrastructure.Messaging;
 using Fixia.Payments.Infrastructure.Persistence;
+using Fixia.Payments.Infrastructure.Persistence.Idempotency;
 using Fixia.Payments.Infrastructure.Persistence.Outbox;
 using Fixia.Payments.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -46,6 +47,7 @@ public static class DependencyInjection
         // Billeteras simuladas y tarifas de comisión (GC-480)
         services.AddScoped<IWalletRepository, WalletRepository>();
         services.AddScoped<ICommissionRuleRepository, CommissionRuleRepository>();
+        services.AddScoped<IIdempotencyStore, EfIdempotencyStore>();
 
         // Outbox transaccional (GC-477): el servicio escribe el evento en la base y el relay lo publica en Kafka.
         services.AddScoped<IBusinessEventOutbox, OutboxWriter>();

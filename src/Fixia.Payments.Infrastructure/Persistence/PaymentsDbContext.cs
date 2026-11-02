@@ -1,4 +1,5 @@
 using Fixia.Payments.Domain.Entities;
+using Fixia.Payments.Infrastructure.Persistence.Idempotency;
 using Fixia.Payments.Infrastructure.Persistence.Outbox;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,6 +13,7 @@ public class PaymentsDbContext : DbContext
     public DbSet<Wallet> Wallets => Set<Wallet>();
     public DbSet<WalletEntry> WalletEntries => Set<WalletEntry>();
     public DbSet<CommissionRule> CommissionRules => Set<CommissionRule>();
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
 
     /// <summary>Id fijo de la cuenta de Fixia sembrada por la migración de GC-480.</summary>
     public static readonly Guid PlatformWalletId = Guid.Parse("00000000-0000-0000-0000-0000000f1a10");
@@ -298,6 +300,21 @@ public class PaymentsDbContext : DbContext
 
             entity.HasData(new CommissionRule(InitialCommissionRuleId, 0.15m, SeedDate, null,
                 "Tarifa inicial aprobada por el PO (GC-476): 15 % a cargo del cliente", SeedDate));
+        });
+
+        // Claves de idempotencia (GC-482, GC-483): una por usuario, operación y clave.
+        modelBuilder.Entity<IdempotencyRecord>(entity =>
+        {
+            entity.ToTable("idempotency_keys");
+
+            entity.HasKey(e => new { e.UserId, e.Operation, e.Key }).HasName("pk_idempotency_keys");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Operation).HasColumnName("operation").HasMaxLength(40);
+            entity.Property(e => e.Key).HasColumnName("idempotency_key").HasMaxLength(100);
+            entity.Property(e => e.RequestHash).HasColumnName("request_hash").HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ResponseJson).HasColumnName("response_json");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(e => e.CompletedAt).HasColumnName("completed_at");
         });
     }
 }

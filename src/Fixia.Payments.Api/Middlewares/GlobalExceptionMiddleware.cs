@@ -67,6 +67,21 @@ public class GlobalExceptionMiddleware
                 _logger.LogWarning("Conflicto de billetera: {Message}", exception.Message);
                 break;
 
+            // GC-482/483: la misma Idempotency-Key con otro cuerpo, o la pasarela simulada rechazó.
+            case IdempotencyKeyReuseException reuse:
+                statusCode = HttpStatusCode.UnprocessableEntity;
+                title = "Idempotency-Key reutilizada";
+                detail = reuse.Message;
+                _logger.LogWarning("Idempotency-Key reutilizada con otro cuerpo en {Path}", context.Request.Path);
+                break;
+
+            case GatewayRejectedException rejected:
+                statusCode = HttpStatusCode.PaymentRequired;
+                title = "Operación rechazada por la pasarela";
+                detail = rejected.Message;
+                _logger.LogWarning("Pasarela simulada rechazó la operación en {Path}", context.Request.Path);
+                break;
+
             case InvalidQueryException invalidQuery:
                 statusCode = HttpStatusCode.BadRequest;
                 title = "Parámetros de consulta no válidos";

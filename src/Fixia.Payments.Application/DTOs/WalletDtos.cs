@@ -42,6 +42,21 @@ public record CommissionQuoteResponse(
     DateTime RuleValidFrom
 );
 
+/// <summary>Recarga o retiro simulado (GC-482, GC-483): importe positivo con dos decimales como máximo, en COP.</summary>
+public record WalletAmountRequest(decimal Amount, string? Currency = null);
+
+/// <summary>Resultado de una recarga o retiro: el movimiento creado y los saldos que quedaron.</summary>
+public record WalletOperationResponse(
+    Guid EntryId,
+    WalletEntryType Type,
+    decimal Amount,
+    string Currency,
+    decimal AvailableBalance,
+    decimal HeldBalance,
+    string GatewayReference,
+    DateTime CreatedAt
+);
+
 public static class WalletMappings
 {
     public static WalletResponse ToResponse(this Wallet wallet) =>
