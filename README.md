@@ -28,7 +28,7 @@ ms-payments/
 | `POST` | `/api/payments/{id}/process` | El pagador del pago | Procesa el cobro a través de la pasarela de pagos. |
 | `GET` | `/api/payments/{id}` | Pagador, prestador o `ROLE_ADMIN` | Obtiene el detalle de un pago y su historial de transacciones. |
 | `GET` | `/api/payments/service-request/{serviceRequestId}` | Pagador, prestador o `ROLE_ADMIN` | Obtiene el pago asociado a una solicitud de servicio. |
-| `POST` | `/api/payments/{id}/refund` | `ROLE_ADMIN` | Ejecuta el reembolso de un pago previamente completado. |
+| `POST` | `/api/payments/{id}/refund?reason=` | `ROLE_ADMIN` | Reembolso autorizado con motivo obligatorio e `Idempotency-Key` (GC-487). Con billetera: si está retenido libera el total al cliente; si ya se cobró, lo revierte (prestador y Fixia devuelven, el cliente recibe) o responde 409 sin cambiar nada si no alcanza. Sin billetera: por la pasarela. |
 | `GET` | `/api/payments/wallets/me` | `ROLE_CLIENT`, `ROLE_PROFESSIONAL`, `ROLE_COMPANY` | Saldo disponible y retenido de mi billetera simulada; si no existe, se crea en cero (GC-481). |
 | `GET` | `/api/payments/wallets/me/entries?limit=&cursor=` | `ROLE_CLIENT`, `ROLE_PROFESSIONAL`, `ROLE_COMPANY` | Movimientos de mi billetera, del más reciente al más antiguo; `limit` de 1 a 50 (20 por defecto) y `nextCursor` para la página siguiente (GC-481). |
 | `POST` | `/api/payments/wallets/me/top-ups` | `ROLE_CLIENT` | Recarga simulada (`{"amount": 50000}`) con la cabecera `Idempotency-Key`; 201 con el movimiento y los saldos (GC-482). |
@@ -101,7 +101,7 @@ dotnet ef migrations script -p src/Fixia.Payments.Infrastructure -s src/Fixia.Pa
 
 ## 📨 Eventos (GC-477)
 
-Los eventos `pago.*` se escriben en el **Outbox** (`outbox_events`) en la misma transacción que el cambio del pago y un relay en segundo plano los publica en `fixia.payments.events`, con el sobre de ms-services. Si Kafka está caído, el pago se registra igual y el evento sale cuando vuelve. Contrato completo en [`docs/events/README.md`](docs/events/README.md).
+Los eventos `pago.*` se escriben en el **Outbox** (`outbox_events`) en la misma transacción que el cambio del pago y un relay en segundo plano los publica en `fixia.payments.events`, con el sobre de ms-services. Si Kafka está caído, el pago se registra igual y el evento sale cuando vuelve. Contrato completo en [`docs/events/README.md`](docs/events/README.md), con los esquemas JSON de los cinco eventos (`docs/events/schemas`) y ejemplos del flujo con billetera (`docs/events/examples`); la prueba `EventContractTests` valida los ejemplos y los eventos reales contra los esquemas (GC-488).
 
 ## 🧪 Pruebas
 

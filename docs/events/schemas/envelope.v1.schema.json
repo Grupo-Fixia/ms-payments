@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/payments/envelope.v1.schema.json",
+  "title": "Sobre común de un evento de negocio de ms-payments",
+  "description": "Mismo sobre que ms-services (GC-436) con producer = ms-payments y el pago como agregado. Los datos del hecho van en data, según el esquema de su eventType y schemaVersion (GC-488).",
+  "type": "object",
+  "required": ["eventId", "eventType", "schemaVersion", "occurredAt", "producer", "aggregate", "correlationId", "actor", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "eventId": {
+      "$ref": "common.v1.schema.json#/$defs/uuid",
+      "description": "Identidad del evento; se genera al escribirlo en el Outbox y no cambia en reintentos. Es la clave de idempotencia de los consumidores."
+    },
+    "eventType": {
+      "type": "string",
+      "enum": ["pago.creado", "pago.procesado", "pago.completado", "pago.fallido", "pago.reembolsado"]
+    },
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "occurredAt": { "$ref": "common.v1.schema.json#/$defs/instant" },
+    "producer": { "const": "ms-payments" },
+    "aggregate": {
+      "type": "object",
+      "required": ["type", "id", "sequence"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "Payment" },
+        "id": { "$ref": "common.v1.schema.json#/$defs/uuid", "description": "Id del pago." },
+        "sequence": { "type": "integer", "minimum": 1, "description": "Posición del hecho en la historia del pago: 1, 2, 3… sin huecos ni repetidos." }
+      }
+    },
+    "correlationId": {
+      "$ref": "common.v1.schema.json#/$defs/uuid",
+      "description": "Id de la solicitud de servicio (el mismo valor que usa ms-services). También es la clave del mensaje en Kafka."
+    },
+    "actor": {
+      "type": "object",
+      "required": ["userId", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "userId": {
+          "oneOf": [{ "$ref": "common.v1.schema.json#/$defs/uuid" }, { "type": "null" }],
+          "description": "users.id de quien hizo la operación; null si fue el sistema u otro microservicio."
+        },
+        "role": { "type": "string", "enum": ["CLIENT", "PROFESSIONAL", "COMPANY", "ADMIN", "SYSTEM"] }
+      }
+    },
+    "data": { "type": "object" }
+  }
+}

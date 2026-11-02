@@ -1,13 +1,13 @@
-# Contrato de eventos de ms-payments (GC-477, GC-486)
+# Contrato de eventos de ms-payments (GC-477, GC-486, GC-488)
 
 Cómo publica `ms-payments` sus hechos de negocio en Kafka. Sigue el contrato de `ms-services`
 (`ms-services/docs/events/README.md`, GC-436): mismo sobre, mismas cabeceras, mismo Outbox y mismas reglas del relay.
 Aquí solo se documenta lo propio de pagos.
 
-> **Alcance.** GC-477 y GC-486 estabilizan la publicación de los eventos que el servicio **ya emitía**. GC-476
-> aprobó la billetera con escrow simulada: los eventos de retención, captura y liberación (GC-484, GC-485, GC-487) y
-> los esquemas versionados (GC-488) se agregan después. Un cambio de significado de un evento existente sería una
-> versión nueva de esquema (sección 7), no una edición de los eventos ya publicados.
+> **Alcance.** GC-477 y GC-486 llevaron los eventos al Outbox; GC-488 fija el contrato con **esquemas JSON
+> versionados** (`schemas/`) y **ejemplos** del flujo de billetera (`examples/`), que una prueba automática valida junto
+> con los eventos que el servicio escribe de verdad (`EventContractTests`). La billetera es **simulada** (GC-476): no hay
+> dinero real.
 
 ## 1. Quién publica y cómo
 
@@ -52,16 +52,40 @@ Los importes viajan como `{"amount": "105000.00", "currency": "COP"}`: el valor 
 
 ## 4. Catálogo (versión 1)
 
-| `eventType` | Cuándo | `actor` | `data` |
-| --- | --- | --- | --- |
-| `pago.creado` | Otro microservicio registra el pago por `POST /internal/payments` (un reintento con los mismos datos no publica otro) | `SYSTEM` | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `method`, `status` |
-| `pago.completado` | El pagador procesa el cobro y la pasarela lo aprueba | El pagador | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `transactionReference`, `status` |
-| `pago.fallido` | La pasarela rechaza el cobro | El pagador | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `failureReason`, `status` |
-| `pago.reembolsado` | Un administrador reembolsa un pago completado | `ADMIN` | `paymentId`, `serviceRequestId`, `amount`, `refundReference`, `reason`, `status` |
+Esquemas en `schemas/` (draft 2020-12): `common.v1`, `envelope.v1` y uno por evento, que extiende el sobre y fija
+`eventType`, `schemaVersion` y `data`. Usan `$id` propios (`https://fixia.local/schemas/payments/…`) para no chocar con
+los de `ms-services` en el lakehouse.
 
-**Pendiente (GC-484 y GC-488):** `pago.procesado` todavía no se emite. Con el modelo de billetera aprobado en GC-476
-significará que el total (precio + comisión) quedó **retenido** en la billetera del cliente al contratar, y se agregará
-a este catálogo con su esquema cuando se implemente la retención.
+| `eventType` | Cuándo | `actor` | `data` (obligatorio · *opcional*) |
+| --- | --- | --- | --- |
+| `pago.creado` | Se registra el pago: por la ruta interna o, con billetera, al contratar (GC-484). Un reintento con los mismos datos no publica otro | `SYSTEM` | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `method`, `status=Pending` · *`contractId`, `breakdown`* |
+| `pago.procesado` | Con billetera: el total quedó **retenido** en la billetera del cliente al contratar (GC-484) | `SYSTEM` | `paymentId`, `serviceRequestId`, `contractId`, `clientId`, `providerId`, `amount`, `breakdown`, `status=Processing` |
+| `pago.completado` | Con billetera: se cobró lo retenido al confirmar el cierre (GC-485). Sin billetera: la pasarela aprobó el cobro | `SYSTEM` o el pagador | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `transactionReference`, `status=Completed` · *`contractId`, `breakdown`* |
+| `pago.fallido` | Con billetera: no alcanzó el saldo al contratar (no se retiene nada). Sin billetera: la pasarela rechazó | `SYSTEM` o el pagador | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `failureReason`, `status=Failed` · *`contractId`, `breakdown`* |
+| `pago.reembolsado` | Un administrador devuelve el pago (GC-487) | `ADMIN` | `paymentId`, `serviceRequestId`, `amount`, `refundReference`, `reason`, `kind`, `status=Refunded` · *`breakdown`* |
+
+- **`breakdown`** (pagos con billetera): `price` (lo que recibe el prestador), `commission` (de Fixia, a cargo del
+  cliente), `rate` (`"0.1500"` = 15 %) y `ruleId` (la regla de `commission_rules` aplicada). Siempre
+  `amount = price + commission`.
+- **`kind`** en `pago.reembolsado`: `RELEASE` (se liberó lo retenido; no se había cobrado), `REVERSAL` (se revirtió un
+  pago con billetera ya cobrado: prestador y Fixia devuelven, el cliente recibe) o `GATEWAY` (reembolso por pasarela de
+  un pago sin billetera).
+- **Sin evento:** si el cliente **objeta el cierre** no se cobra ni se publica nada: el pago sigue `Processing`
+  (retenido) hasta que se cierre o un administrador lo libere. **Un servicio contratado no se puede cancelar**
+  (decisión del 2026-11-02), así que no hay liberación automática por cancelación.
+
+### Ejemplos del flujo con billetera (`examples/flujo-billetera/`)
+
+Un servicio de 105 000 COP con 15 % de comisión (total 120 750). Todos cumplen su esquema (prueba automática).
+
+| Archivo | Paso |
+| --- | --- |
+| `01-pago.creado.json` | Se registra el pago al contratar |
+| `02-pago.procesado.json` | Se retienen 120 750 al cliente |
+| `02-alt-pago.fallido-sin-saldo.json` | Alternativa: no alcanzó el saldo |
+| `03-pago.completado.json` | El cliente confirmó el cierre: prestador +105 000, Fixia +15 750 |
+| `03-alt-pago.reembolsado-liberacion.json` | Alternativa: tras una objeción, un administrador libera lo retenido (`RELEASE`) |
+| `04-pago.reembolsado-reverso.json` | Después del cobro, un administrador revierte el pago (`REVERSAL`) |
 
 ### Ejemplo (`pago.creado`, tal como llegó a Kafka en la prueba de GC-477)
 
@@ -125,4 +149,7 @@ Mismas columnas que el de `ms-services`: `event_id` (PK), `event_type`, `schema_
 - Mismas reglas que `ms-services`: agregar un campo opcional a `data` es compatible (misma versión); quitar,
   renombrar o cambiar el significado de un campo es una versión nueva. El historial no se reescribe.
 - Los eventos no llevan tokens, claves, datos de tarjeta ni la respuesta cruda de la pasarela. Los logs del relay
-  registran `eventId`, tipo e intento, nunca el contenido.
+  registran `eventId`, tipo e intento, nunca el contenido. Los esquemas tienen `additionalProperties: false`: un campo
+  no previsto (por ejemplo un número de tarjeta) hace que el evento no cumpla el contrato.
+- **Para el lakehouse (GC-435):** validar cada mensaje contra `schemas/<eventType>.v<schemaVersion>.schema.json` y
+  deduplicar por `eventId`, igual que con los de `ms-services`.

@@ -1,0 +1,41 @@
+{
+  "eventId": "a1b2c3d4-0005-4a00-8a00-000000000005",
+  "eventType": "pago.reembolsado",
+  "schemaVersion": 1,
+  "occurredAt": "2026-10-30T09:15:00.000000Z",
+  "producer": "ms-payments",
+  "aggregate": {
+    "type": "Payment",
+    "id": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+    "sequence": 3
+  },
+  "correlationId": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+  "actor": {
+    "userId": "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a",
+    "role": "ADMIN"
+  },
+  "data": {
+    "paymentId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+    "serviceRequestId": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "amount": {
+      "amount": "120750.00",
+      "currency": "COP"
+    },
+    "refundReference": "REF-7E1C2B9A04D84F2BA3C1",
+    "reason": "Objeción del cierre resuelta a favor del cliente",
+    "kind": "RELEASE",
+    "breakdown": {
+      "price": {
+        "amount": "105000.00",
+        "currency": "COP"
+      },
+      "commission": {
+        "amount": "15750.00",
+        "currency": "COP"
+      },
+      "rate": "0.1500",
+      "ruleId": "00000000-0000-0000-0000-000000000015"
+    },
+    "status": "Refunded"
+  }
+}
