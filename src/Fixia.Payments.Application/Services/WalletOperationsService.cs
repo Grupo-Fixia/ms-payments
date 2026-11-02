@@ -1,6 +1,5 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
+using Fixia.Payments.Application.Common;
 using Fixia.Payments.Application.Common.Interfaces;
 using Fixia.Payments.Application.Common.Security;
 using Fixia.Payments.Application.DTOs;
@@ -28,7 +27,6 @@ public class WalletOperationsService : IWalletOperationsService
 {
     public const string TopUpOperation = "wallet.top-up";
     public const string WithdrawalOperation = "wallet.withdrawal";
-    public const int MaxKeyLength = 100;
 
     private readonly IWalletRepository _wallets;
     private readonly IPaymentGateway _gateway;
@@ -86,7 +84,7 @@ public class WalletOperationsService : IWalletOperationsService
         Func<Wallet, decimal, string, CancellationToken, Task<(WalletEntryType Type, string Reference)>> authorize,
         CancellationToken ct)
     {
-        var key = ValidateKey(idempotencyKey);
+        var key = IdempotencyKeys.Validate(idempotencyKey);
         var currency = string.IsNullOrWhiteSpace(request.Currency)
             ? Wallet.DefaultCurrency
             : request.Currency.Trim().ToUpperInvariant();
@@ -110,23 +108,9 @@ public class WalletOperationsService : IWalletOperationsService
             }, ct);
     }
 
-    private static string ValidateKey(string? key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-            throw new InvalidQueryException("La cabecera Idempotency-Key es obligatoria (por ejemplo, un UUID nuevo por operación).");
-        var trimmed = key.Trim();
-        if (trimmed.Length > MaxKeyLength || trimmed.Any(c => c < 0x21 || c > 0x7E))
-            throw new InvalidQueryException(
-                $"La Idempotency-Key debe tener hasta {MaxKeyLength} caracteres visibles, sin espacios.");
-        return trimmed;
-    }
-
     /// <summary>Huella del cuerpo normalizado: 50000, 50000.0 y 50000.00 son el mismo pedido.</summary>
-    private static string Hash(decimal amount, string currency)
-    {
-        var normalized = $"{amount.ToString("0.00", CultureInfo.InvariantCulture)}|{currency}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
-    }
+    private static string Hash(decimal amount, string currency) =>
+        IdempotencyKeys.Hash($"{amount.ToString("0.00", CultureInfo.InvariantCulture)}|{currency}");
 
     private DateTime Now() => _clock.GetUtcNow().UtcDateTime;
 }

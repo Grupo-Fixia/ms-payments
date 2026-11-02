@@ -66,17 +66,26 @@ public class PaymentsController : ControllerBase
     }
 
     /// <summary>
-    /// Procesa el reembolso de un pago completado. Solo un administrador de Fixia.
+    /// Reembolso autorizado (GC-487), solo un administrador de Fixia. Con billetera: si el pago está retenido libera el
+    /// total al cliente; si ya se cobró, lo revierte (prestador y Fixia devuelven, el cliente recibe) o responde 409 si
+    /// no se puede sin dejar saldos negativos. Exige <c>reason</c> e <c>Idempotency-Key</c>: repetirlo no devuelve dos
+    /// veces (responde lo mismo con <c>Idempotent-Replayed: true</c>).
     /// </summary>
     [HttpPost("{id:guid}/refund")]
     [Authorize(Roles = Requester.RoleAdmin)]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> Refund(Guid id, [FromQuery] string? reason, CancellationToken ct)
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Refund(Guid id, [FromQuery] string? reason,
+        [FromHeader(Name = WalletsController.IdempotencyKeyHeader)] string? idempotencyKey,
+        [FromServices] IPaymentRefundService refunds, CancellationToken ct)
     {
-        var response = await _paymentService.RefundPaymentAsync(id, User.ToRequester(), reason, ct);
-        return Ok(response);
+        var result = await refunds.RefundAsync(id, User.ToRequester(), reason, idempotencyKey, ct);
+        if (result.Replayed)
+            Response.Headers[WalletsController.ReplayedHeader] = "true";
+        return Ok(result.Value);
     }
 }

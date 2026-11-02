@@ -13,5 +13,4 @@ public interface IPaymentService
     Task<PaymentResponse> ProcessPaymentAsync(Guid paymentId, Requester requester, ProcessPaymentRequest? request = null, CancellationToken ct = default);
     Task<PaymentResponse> GetByIdAsync(Guid paymentId, Requester requester, CancellationToken ct = default);
     Task<PaymentResponse> GetByServiceRequestIdAsync(Guid serviceRequestId, Requester requester, CancellationToken ct = default);
-    Task<PaymentResponse> RefundPaymentAsync(Guid paymentId, Requester requester, string? reason = null, CancellationToken ct = default);
 }
