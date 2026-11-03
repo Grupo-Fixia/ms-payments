@@ -33,6 +33,7 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("JWT_AUDIENCE", Audience);
         builder.UseSetting("INTERNAL_API_KEY", InternalApiKey);
         builder.UseSetting("Outbox:RelayEnabled", "false");
+        builder.UseSetting("ServiceEvents:ConsumerEnabled", "false");
 
         builder.ConfigureTestServices(services =>
         {
