@@ -62,7 +62,7 @@ public class PaymentService : IPaymentService
         await _unitOfWork.SaveChangesAsync(ct);
 
         _logger.LogInformation("Retención del pago '{PaymentId}' reintentada con éxito.", payment.Id);
-        return payment.ToResponse();
+        return payment.ToResponse(requester);
     }
 
     public async Task<CreatePaymentResult> CreatePaymentAsync(CreatePaymentRequest request, CancellationToken ct = default)
@@ -142,13 +142,13 @@ public class PaymentService : IPaymentService
         _paymentRepository.Update(payment);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        return payment.ToResponse();
+        return payment.ToResponse(requester);
     }
 
     public async Task<PaymentResponse> GetByIdAsync(Guid paymentId, Requester requester, CancellationToken ct = default)
     {
         var payment = await GetVisiblePaymentAsync(paymentId, requester, ct);
-        return payment.ToResponse();
+        return payment.ToResponse(requester);
     }
 
     public async Task<PaymentResponse> GetByServiceRequestIdAsync(Guid serviceRequestId, Requester requester,
@@ -158,7 +158,7 @@ public class PaymentService : IPaymentService
         if (payment == null || !requester.CanView(payment))
             throw PaymentNotFoundException.ForServiceRequest(serviceRequestId);
 
-        return payment.ToResponse();
+        return payment.ToResponse(requester);
     }
 
     /// <summary>Un pago ajeno responde igual que uno inexistente (404), para no revelar que existe.</summary>

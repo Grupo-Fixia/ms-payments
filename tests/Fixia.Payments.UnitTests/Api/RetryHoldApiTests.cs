@@ -97,4 +97,32 @@ public class RetryHoldApiTests : IClassFixture<PaymentsApiFactory>
 
         (await ProcessAsync(paymentId, providerId, "ROLE_PROFESSIONAL")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
+
+    [Fact]
+    public async Task Response_ShouldSayExplicitlyWhetherTheHoldCanBeRetried()
+    {
+        // GC-491: Flutter no debe deducir la retención de method = Wallet; el JSON lo dice.
+        var (paymentId, clientId, providerId) = await GivenFailedHoldAsync(150000m);
+
+        async Task<JsonElement> GetAsync(Guid userId, string role) =>
+            await _factory.ClientWithToken(_factory.Token(userId, role))
+                .GetFromJsonAsync<JsonElement>($"/api/payments/{paymentId}", Json);
+
+        var asClient = await GetAsync(clientId, "ROLE_CLIENT");
+        asClient.GetProperty("isWalletPayment").GetBoolean().Should().BeTrue();
+        asClient.GetProperty("holdStatus").GetString().Should().Be("Failed");
+        asClient.GetProperty("canRetryHold").GetBoolean().Should().BeTrue();
+        var breakdown = asClient.GetProperty("breakdown");
+        breakdown.GetProperty("price").GetDecimal().Should().Be(105000m);
+        breakdown.GetProperty("commission").GetDecimal().Should().Be(15750m);
+        breakdown.GetProperty("commissionRate").GetDecimal().Should().Be(0.15m);
+        breakdown.GetProperty("total").GetDecimal().Should().Be(120750m);
+
+        (await GetAsync(providerId, "ROLE_PROFESSIONAL")).GetProperty("canRetryHold").GetBoolean()
+            .Should().BeFalse("solo el cliente que paga reintenta");
+
+        var retried = await (await ProcessAsync(paymentId, clientId)).Content.ReadFromJsonAsync<JsonElement>(Json);
+        retried.GetProperty("holdStatus").GetString().Should().Be("Held");
+        retried.GetProperty("canRetryHold").GetBoolean().Should().BeFalse();
+    }
 }

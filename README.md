@@ -34,6 +34,16 @@ ms-payments/
 | `POST` | `/api/payments/wallets/me/top-ups` | `ROLE_CLIENT` | Recarga simulada (`{"amount": 50000}`) con la cabecera `Idempotency-Key`; 201 con el movimiento y los saldos (GC-482). |
 | `POST` | `/api/payments/wallets/me/withdrawals` | `ROLE_PROFESSIONAL`, `ROLE_COMPANY` | Retiro simulado del saldo disponible (nunca del retenido), con `Idempotency-Key` (GC-483). |
 | `GET` | `/api/payments/commission-quote?amount=&currency=` | Cualquier usuario autenticado | Precio, comisión de Fixia y total con la tarifa vigente, para mostrarlo antes de aceptar la cotización (GC-471, criterio 1). No guarda nada. |
+
+**Respuesta del pago y retención (GC-491).** Además de `status` y `method`, cada pago responde estos campos, para que el cliente no tenga que deducir la retención:
+
+| Campo | Significado |
+|---|---|
+| `isWalletPayment` | `true` si es un pago con billetera con desglose (los que crea `servicio.contratado`). `method = Wallet` por sí solo no basta. |
+| `contractId` | Contrato de ms-services que originó el pago (con billetera). |
+| `breakdown` | `{price, commission, commissionRate, total}`: lo que recibe el prestador, la comisión de Fixia, la tarifa aplicada y lo que paga el cliente. `null` sin billetera. |
+| `holdStatus` | `NotApplicable` (sin billetera), `Pending`, `Held` (retenido), `Failed` (no se pudo retener), `Captured` (cobrado al cerrar), `Released` (liberado por un administrador) o `Reversed` (revertido después del cobro). |
+| `canRetryHold` | `true` solo si la retención falló **y** quien consulta es el cliente que paga: es cuando `POST /{id}/process` puede reintentarla. |
 | `GET` | `/api/payments/health` | Público | Health check del microservicio (también `/actuator/health`). |
 | `GET` | `/api/payments/swagger` | Público | Documentación interactiva OpenAPI/Swagger (botón *Authorize* para el token). |
 

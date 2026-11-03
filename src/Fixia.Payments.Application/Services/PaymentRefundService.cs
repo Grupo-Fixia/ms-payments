@@ -86,7 +86,7 @@ public class PaymentRefundService : IPaymentRefundService
                 await _unitOfWork.SaveChangesAsync(token);
 
                 _logger.LogInformation("Pago '{PaymentId}' reembolsado ({Kind}).", payment.Id, kind);
-                return payment.ToResponse();
+                return payment.ToResponse(requester);
             }, ct);
     }
 
