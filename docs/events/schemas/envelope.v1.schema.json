@@ -24,13 +24,13 @@
       "additionalProperties": false,
       "properties": {
         "type": { "const": "Payment" },
-        "id": { "$ref": "common.v1.schema.json#/$defs/uuid", "description": "Id del pago." },
+        "id": { "$ref": "common.v1.schema.json#/$defs/uuid", "description": "Id del pago; también es la clave del mensaje en Kafka (GC-436, validado por el lakehouse)." },
         "sequence": { "type": "integer", "minimum": 1, "description": "Posición del hecho en la historia del pago: 1, 2, 3… sin huecos ni repetidos." }
       }
     },
     "correlationId": {
       "$ref": "common.v1.schema.json#/$defs/uuid",
-      "description": "Id de la solicitud de servicio (el mismo valor que usa ms-services). También es la clave del mensaje en Kafka."
+      "description": "Id de la solicitud de servicio (el mismo valor que usa ms-services): enlaza los eventos de pagos con los del servicio."
     },
     "actor": {
       "type": "object",
