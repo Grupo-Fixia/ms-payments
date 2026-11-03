@@ -404,6 +404,28 @@ namespace Fixia.Payments.Infrastructure.Persistence.Migrations
                     b.ToTable("idempotency_keys", (string)null);
                 });
 
+            modelBuilder.Entity("Fixia.Payments.Infrastructure.Persistence.Inbox.ProcessedEvent", b =>
+                {
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("event_type");
+
+                    b.Property<DateTime>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.HasKey("EventId")
+                        .HasName("pk_processed_events");
+
+                    b.ToTable("processed_events", (string)null);
+                });
+
             modelBuilder.Entity("Fixia.Payments.Infrastructure.Persistence.Outbox.OutboxEvent", b =>
                 {
                     b.Property<Guid>("EventId")

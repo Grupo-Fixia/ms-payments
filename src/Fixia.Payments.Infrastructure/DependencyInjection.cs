@@ -3,6 +3,7 @@ using Fixia.Payments.Infrastructure.Gateways;
 using Fixia.Payments.Infrastructure.Messaging;
 using Fixia.Payments.Infrastructure.Persistence;
 using Fixia.Payments.Infrastructure.Persistence.Idempotency;
+using Fixia.Payments.Infrastructure.Persistence.Inbox;
 using Fixia.Payments.Infrastructure.Persistence.Outbox;
 using Fixia.Payments.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -57,6 +58,14 @@ public static class DependencyInjection
         if (configuration.GetValue($"{OutboxOptions.SectionName}:{nameof(OutboxOptions.RelayEnabled)}", true))
         {
             services.AddHostedService<OutboxRelay>();
+        }
+
+        // Eventos de ms-services (GC-484, GC-485): retener al contratar y cobrar al cerrar.
+        services.AddScoped<IProcessedEventStore, EfProcessedEventStore>();
+        services.Configure<ServiceEventsOptions>(configuration.GetSection(ServiceEventsOptions.SectionName));
+        if (configuration.GetValue($"{ServiceEventsOptions.SectionName}:{nameof(ServiceEventsOptions.ConsumerEnabled)}", true))
+        {
+            services.AddHostedService<ServiceEventsConsumer>();
         }
 
         return services;

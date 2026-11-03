@@ -1,5 +1,6 @@
 using Fixia.Payments.Domain.Entities;
 using Fixia.Payments.Infrastructure.Persistence.Idempotency;
+using Fixia.Payments.Infrastructure.Persistence.Inbox;
 using Fixia.Payments.Infrastructure.Persistence.Outbox;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,6 +15,7 @@ public class PaymentsDbContext : DbContext
     public DbSet<WalletEntry> WalletEntries => Set<WalletEntry>();
     public DbSet<CommissionRule> CommissionRules => Set<CommissionRule>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+    public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
 
     /// <summary>Id fijo de la cuenta de Fixia sembrada por la migración de GC-480.</summary>
     public static readonly Guid PlatformWalletId = Guid.Parse("00000000-0000-0000-0000-0000000f1a10");
@@ -315,6 +317,17 @@ public class PaymentsDbContext : DbContext
             entity.Property(e => e.ResponseJson).HasColumnName("response_json");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(e => e.CompletedAt).HasColumnName("completed_at");
+        });
+
+        // Bandeja de entrada (GC-484, GC-485): eventos de ms-services ya aplicados, por eventId.
+        modelBuilder.Entity<ProcessedEvent>(entity =>
+        {
+            entity.ToTable("processed_events");
+
+            entity.HasKey(e => e.EventId).HasName("pk_processed_events");
+            entity.Property(e => e.EventId).HasColumnName("event_id").ValueGeneratedNever();
+            entity.Property(e => e.EventType).HasColumnName("event_type").HasMaxLength(60).IsRequired();
+            entity.Property(e => e.ProcessedAt).HasColumnName("processed_at").IsRequired();
         });
     }
 }
