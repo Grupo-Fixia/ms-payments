@@ -131,7 +131,7 @@ public class PostgresPersistenceTests : IClassFixture<PostgresDatabase>
             .OrderBy(e => e.AggregateSequence)
             .ToListAsync();
         events.Select(e => e.EventType).Should().Equal(PaymentEvents.Created, PaymentEvents.Completed);
-        events.Should().OnlyContain(e => e.Status == OutboxStatus.Pending && e.MessageKey == request.ServiceRequestId.ToString());
+        events.Should().OnlyContain(e => e.Status == OutboxStatus.Pending && e.MessageKey == created.Id.ToString());
 
         var stored = await check.Payments.SingleAsync(p => p.Id == created.Id);
         stored.Status.Should().Be(PaymentStatus.Completed);

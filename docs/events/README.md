@@ -23,8 +23,10 @@ ningún hecho se publica antes de confirmarse ni se pierde si Kafka está caído
 ## 2. Tópico, clave y cabeceras
 
 - **Tópico:** `fixia.payments.events` (lo crea el DevOps; 3 particiones como `fixia.services.service-requests`).
-- **Clave del mensaje:** el id de la **solicitud de servicio** (`correlationId`). Todos los eventos de pagos de un
-  servicio caen en la misma partición y se leen en orden.
+- **Clave del mensaje:** `aggregate.id`, el id del **pago**, como en el contrato de `ms-services` (GC-436) y como
+  valida el lakehouse (GC-435). Todos los eventos de un pago caen en la misma partición y se leen en orden; como hay un
+  solo pago por solicitud, también quedan en orden los de cada servicio. La relación con el servicio va en
+  `correlationId`.
 - **Cabeceras:** `eventId`, `eventType`, `schemaVersion` y `content-type: application/json`. Repiten datos del cuerpo.
 - **Cuerpo:** el sobre de la sección 3, en JSON UTF-8.
 - **Productor:** idempotente, `acks=all`, tiempo máximo por mensaje de 10 s.
@@ -39,7 +41,7 @@ ningún hecho se publica antes de confirmarse ni se pierde si Kafka está caído
 | `occurredAt` | instante UTC | Momento del hecho, en microsegundos (`2026-11-02T20:02:55.536580Z`); es el mismo que queda en la base |
 | `producer` | `ms-payments` | |
 | `aggregate.type` | `Payment` | El agregado es el pago |
-| `aggregate.id` | UUID | Id del pago |
+| `aggregate.id` | UUID | Id del pago; también es la clave del mensaje |
 | `aggregate.sequence` | entero ≥ 1 | Posición del hecho en la historia del pago: 1, 2, 3… sin huecos ni repetidos (restricción única `(aggregate_id, aggregate_sequence)`) |
 | `correlationId` | UUID | Id de la solicitud de servicio, el mismo valor que usa `ms-services`. Enlaza los eventos de pagos con los del servicio |
 | `actor.userId` | UUID o null | `users.id` de quien hizo la operación (el `sub` del token sin `usr_`); null si fue el sistema u otro microservicio |
@@ -64,7 +66,7 @@ a este catálogo con su esquema cuando se implemente la retención.
 ### Ejemplo (`pago.creado`, tal como llegó a Kafka en la prueba de GC-477)
 
 Cabeceras: `eventId:e6161fce-…, eventType:pago.creado, schemaVersion:1, content-type:application/json` ·
-Clave: `11111111-1111-4111-8111-111111111111`
+Clave: `05717e69-811e-42db-8343-39fb9a16c99c` (el `aggregate.id`)
 
 ```json
 {

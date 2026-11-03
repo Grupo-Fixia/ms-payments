@@ -148,7 +148,8 @@ public class PaymentsApiSecurityTests : IClassFixture<PaymentsApiFactory>
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PaymentsDbContext>();
         (await db.Payments.CountAsync(p => p.ServiceRequestId == request.ServiceRequestId)).Should().Be(1);
-        (await db.OutboxEvents.CountAsync(e => e.MessageKey == request.ServiceRequestId.ToString())).Should().Be(1);
+        var paymentId = (await db.Payments.SingleAsync(p => p.ServiceRequestId == request.ServiceRequestId)).Id;
+        (await db.OutboxEvents.CountAsync(e => e.AggregateId == paymentId)).Should().Be(1);
     }
 
     [Fact]

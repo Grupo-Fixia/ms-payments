@@ -11,8 +11,9 @@ namespace Fixia.Payments.Infrastructure.Persistence.Outbox;
 /// confirma con el mismo <c>SaveChangesAsync</c> que el cambio de negocio, o no existe.
 /// <para>
 /// El sobre es el de ms-services (<c>envelope.v1</c>) con <c>producer = ms-payments</c>: el agregado es el pago
-/// (<c>aggregate.type = Payment</c>, secuencia propia 1, 2, 3…) y la correlación y la clave del mensaje son la
-/// solicitud de servicio, para que los eventos de un mismo servicio queden en orden en la misma partición.
+/// (<c>aggregate.type = Payment</c>, secuencia propia 1, 2, 3…) y <b>la clave del mensaje es <c>aggregate.id</c></b> (el
+/// pago), como exige el contrato de GC-436 y valida el lakehouse (GC-435). La correlación con el servicio va en
+/// <c>correlationId</c> (la solicitud). Como hay un solo pago por solicitud, ordenar por pago es ordenar por servicio.
 /// </para>
 /// </summary>
 public sealed class OutboxWriter : IBusinessEventOutbox
@@ -67,7 +68,7 @@ public sealed class OutboxWriter : IBusinessEventOutbox
             businessEvent.PaymentId,
             sequence,
             PaymentEvents.Topic,
-            businessEvent.ServiceRequestId.ToString(),
+            businessEvent.PaymentId.ToString(),
             JsonSerializer.Serialize(envelope, JsonOptions),
             occurredAt);
 

@@ -33,7 +33,7 @@ public class OutboxWriterTests
         var stored = await db.OutboxEvents.SingleAsync();
         stored.EventType.Should().Be("pago.creado");
         stored.Topic.Should().Be("fixia.payments.events");
-        stored.MessageKey.Should().Be(payment.ServiceRequestId.ToString());
+        stored.MessageKey.Should().Be(payment.Id.ToString(), "la clave es aggregate.id, como exige el contrato y valida el lakehouse");
         stored.AggregateType.Should().Be("Payment");
         stored.AggregateId.Should().Be(payment.Id);
         stored.AggregateSequence.Should().Be(1);
