@@ -17,6 +17,12 @@ public sealed record Requester(Guid UserId, IReadOnlyCollection<string> Roles)
 
     public bool IsAdmin => Roles.Contains(RoleAdmin);
 
+    /// <summary>Roles con billetera propia (GC-481): cliente, técnico y empresa. El administrador no tiene.</summary>
+    public const string WalletRoles = RoleClient + "," + RoleProfessional + "," + RoleCompany;
+
+    public bool HasWallet =>
+        Roles.Contains(RoleClient) || Roles.Contains(RoleProfessional) || Roles.Contains(RoleCompany);
+
     /// <summary>Puede ver un pago quien lo paga, quien lo recibe o un administrador de Fixia.</summary>
     public bool CanView(Payment payment) =>
         IsAdmin || payment.ClientId == UserId || payment.ProviderId == UserId;

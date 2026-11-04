@@ -43,6 +43,10 @@ public static class DependencyInjection
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IPaymentGateway, MockPaymentGateway>();
 
+        // Billeteras simuladas y tarifas de comisión (GC-480)
+        services.AddScoped<IWalletRepository, WalletRepository>();
+        services.AddScoped<ICommissionRuleRepository, CommissionRuleRepository>();
+
         // Outbox transaccional (GC-477): el servicio escribe el evento en la base y el relay lo publica en Kafka.
         services.AddScoped<IBusinessEventOutbox, OutboxWriter>();
         services.AddSingleton<IMessagePublisher, KafkaEventPublisher>();
