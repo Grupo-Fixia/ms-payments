@@ -1,16 +1,52 @@
 using Fixia.Payments.Application.Common.Interfaces;
 using Fixia.Payments.Domain.Enums;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Fixia.Payments.Infrastructure.Gateways;
 
 public class MockPaymentGateway : IPaymentGateway
 {
-    private readonly ILogger<MockPaymentGateway> _logger;
+    /// <summary>
+    /// Recargas y retiros por encima de este monto se rechazan, para poder demostrar y probar el rechazo (GC-482,
+    /// GC-483). Se cambia con <c>PaymentGateway__Mock__RejectAmountsAbove</c>.
+    /// </summary>
+    public const decimal DefaultRejectAmountsAbove = 10_000_000m;
 
-    public MockPaymentGateway(ILogger<MockPaymentGateway> logger)
+    private readonly ILogger<MockPaymentGateway> _logger;
+    private readonly decimal _rejectAmountsAbove;
+
+    public MockPaymentGateway(ILogger<MockPaymentGateway> logger, IConfiguration? configuration = null)
     {
         _logger = logger;
+        _rejectAmountsAbove = configuration?.GetValue<decimal?>("PaymentGateway:Mock:RejectAmountsAbove")
+                              ?? DefaultRejectAmountsAbove;
+    }
+
+    public Task<PaymentGatewayResult> ProcessTopUpAsync(Guid walletId, decimal amount, string currency,
+        CancellationToken ct = default) =>
+        Task.FromResult(Simulate("TOPUP", walletId, amount, currency));
+
+    public Task<PaymentGatewayResult> ProcessPayoutAsync(Guid walletId, decimal amount, string currency,
+        CancellationToken ct = default) =>
+        Task.FromResult(Simulate("PAYOUT", walletId, amount, currency));
+
+    private PaymentGatewayResult Simulate(string operation, Guid walletId, decimal amount, string currency)
+    {
+        var reference = $"{operation}-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid():N}"[..32].ToUpperInvariant();
+        if (amount > _rejectAmountsAbove)
+        {
+            _logger.LogInformation("Pasarela simulada: {Operation} rechazado para la billetera {WalletId} ({Amount} {Currency}).",
+                operation, walletId, amount, currency);
+            return new PaymentGatewayResult(false, reference,
+                $"La pasarela simulada rechazó la operación: supera el máximo de {_rejectAmountsAbove:0.00} {currency}.",
+                "{\"status\":\"REJECTED\",\"gateway\":\"FixiaMockGateway\"}");
+        }
+
+        _logger.LogInformation("Pasarela simulada: {Operation} aprobado para la billetera {WalletId} ({Amount} {Currency}).",
+            operation, walletId, amount, currency);
+        return new PaymentGatewayResult(true, reference, null,
+            "{\"status\":\"APPROVED\",\"gateway\":\"FixiaMockGateway\"}");
     }
 
     public Task<PaymentGatewayResult> ProcessChargeAsync(

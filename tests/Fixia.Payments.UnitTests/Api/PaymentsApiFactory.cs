@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -37,7 +38,10 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<Program>
         {
             var registration = services.Single(d => d.ServiceType == typeof(DbContextOptions<PaymentsDbContext>));
             services.Remove(registration);
-            services.AddDbContext<PaymentsDbContext>(options => options.UseInMemoryDatabase(_databaseName));
+            // La base en memoria no tiene transacciones: se ignoran (las pruebas con PostgreSQL cubren esa parte).
+            services.AddDbContext<PaymentsDbContext>(options => options
+                .UseInMemoryDatabase(_databaseName)
+                .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning)));
         });
     }
 
