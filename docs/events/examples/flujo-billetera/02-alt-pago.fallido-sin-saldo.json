@@ -1,0 +1,42 @@
+{
+  "eventId": "a1b2c3d4-0003-4a00-8a00-000000000003",
+  "eventType": "pago.fallido",
+  "schemaVersion": 1,
+  "occurredAt": "2026-10-26T17:45:00.120000Z",
+  "producer": "ms-payments",
+  "aggregate": {
+    "type": "Payment",
+    "id": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+    "sequence": 2
+  },
+  "correlationId": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+  "actor": {
+    "userId": null,
+    "role": "SYSTEM"
+  },
+  "data": {
+    "paymentId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+    "serviceRequestId": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "contractId": "7b8c9d0e-1f2a-4b3c-8d4e-6f708192a3b4",
+    "clientId": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+    "providerId": "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
+    "amount": {
+      "amount": "120750.00",
+      "currency": "COP"
+    },
+    "failureReason": "Saldo disponible insuficiente: hay 50000.00 COP y se necesitan 120750.00.",
+    "breakdown": {
+      "price": {
+        "amount": "105000.00",
+        "currency": "COP"
+      },
+      "commission": {
+        "amount": "15750.00",
+        "currency": "COP"
+      },
+      "rate": "0.1500",
+      "ruleId": "00000000-0000-0000-0000-000000000015"
+    },
+    "status": "Failed"
+  }
+}

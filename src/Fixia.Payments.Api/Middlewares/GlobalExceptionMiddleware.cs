@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using Fixia.Payments.Domain.Exceptions;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Fixia.Payments.Api.Middlewares;
@@ -48,6 +50,65 @@ public class GlobalExceptionMiddleware
                 title = "Transición de estado de pago inválida";
                 detail = invalidStatus.Message;
                 _logger.LogWarning("Conflicto de estado de pago: {Message}", invalidStatus.Message);
+                break;
+
+            case PaymentAccessDeniedException accessDenied:
+                statusCode = HttpStatusCode.Forbidden;
+                title = "Acceso denegado";
+                detail = accessDenied.Message;
+                _logger.LogWarning("Operación de pago no permitida: {Message}", accessDenied.Message);
+                break;
+
+            // GC-480: el movimiento dejaría un saldo negativo, o no hay tarifa de comisión vigente.
+            case InsufficientBalanceException or CommissionRuleNotFoundException:
+                statusCode = HttpStatusCode.Conflict;
+                title = exception is InsufficientBalanceException ? "Saldo insuficiente" : "Sin tarifa de comisión vigente";
+                detail = exception.Message;
+                _logger.LogWarning("Conflicto de billetera: {Message}", exception.Message);
+                break;
+
+            // GC-482/483: la misma Idempotency-Key con otro cuerpo, o la pasarela simulada rechazó.
+            case IdempotencyKeyReuseException reuse:
+                statusCode = HttpStatusCode.UnprocessableEntity;
+                title = "Idempotency-Key reutilizada";
+                detail = reuse.Message;
+                _logger.LogWarning("Idempotency-Key reutilizada con otro cuerpo en {Path}", context.Request.Path);
+                break;
+
+            case GatewayRejectedException rejected:
+                statusCode = HttpStatusCode.PaymentRequired;
+                title = "Operación rechazada por la pasarela";
+                detail = rejected.Message;
+                _logger.LogWarning("Pasarela simulada rechazó la operación en {Path}", context.Request.Path);
+                break;
+
+            case InvalidQueryException invalidQuery:
+                statusCode = HttpStatusCode.BadRequest;
+                title = "Parámetros de consulta no válidos";
+                detail = invalidQuery.Message;
+                break;
+
+            case PaymentConflictException conflict:
+                statusCode = HttpStatusCode.Conflict;
+                title = "Conflicto con un pago existente";
+                detail = conflict.Message;
+                _logger.LogWarning("Conflicto de pago: {Message}", conflict.Message);
+                break;
+
+            // Otra operación cambió el mismo pago al mismo tiempo (bloqueo optimista, GC-477).
+            case DbUpdateConcurrencyException:
+                statusCode = HttpStatusCode.Conflict;
+                title = "Modificación concurrente";
+                detail = "El pago cambió mientras se procesaba la solicitud. Consúltelo de nuevo y reintente.";
+                _logger.LogWarning("Conflicto de concurrencia sobre un pago en {Path}", context.Request.Path);
+                break;
+
+            // Restricción única violada por dos creaciones simultáneas de la misma solicitud (GC-477).
+            case DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } }:
+                statusCode = HttpStatusCode.Conflict;
+                title = "Conflicto con un pago existente";
+                detail = "La solicitud de servicio ya tiene un pago registrado.";
+                _logger.LogWarning("Violación de unicidad al guardar un pago en {Path}", context.Request.Path);
                 break;
 
             case PaymentDomainException domainEx:
