@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/payments/pago.completado.v1.schema.json",
+  "title": "pago.completado (versión 1)",
+  "description": "El pago se cobró. Con billetera: al confirmar el cliente el cierre, lo retenido se cobró y el prestador recibió el precio y Fixia la comisión (GC-485). Sin billetera: la pasarela aprobó el cobro.",
+  "allOf": [{ "$ref": "envelope.v1.schema.json" }],
+  "properties": {
+    "eventType": { "const": "pago.completado" },
+    "schemaVersion": { "const": 1 },
+    "data": {
+      "type": "object",
+      "required": ["paymentId", "serviceRequestId", "clientId", "providerId", "amount", "transactionReference", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "paymentId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "serviceRequestId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "contractId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "clientId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "providerId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "amount": { "$ref": "common.v1.schema.json#/$defs/money" },
+        "transactionReference": { "type": ["string", "null"], "maxLength": 100 },
+        "breakdown": { "$ref": "common.v1.schema.json#/$defs/breakdown" },
+        "status": { "const": "Completed" }
+      }
+    }
+  }
+}

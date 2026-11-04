@@ -160,5 +160,31 @@ public class Payment
             gatewayResponse
         ));
     }
+
+    /// <summary>Pago con billetera simulada (GC-480): se mueve por el libro de las billeteras, no por la pasarela.</summary>
+    public bool IsWalletPayment => Method == PaymentMethod.Wallet && BaseAmount.HasValue;
+
+    /// <summary>
+    /// Libera al cliente lo retenido de un pago con billetera que todavía no se cobró (GC-487). En el modelo de billetera
+    /// el estado <c>Processing</c> significa "retenido". Queda <c>Refunded</c>.
+    /// </summary>
+    public void ReleaseHold(string reference)
+    {
+        if (!IsWalletPayment)
+            throw new PaymentDomainException("Solo un pago con billetera tiene saldo retenido que liberar.");
+        if (Status != PaymentStatus.Processing)
+            throw new InvalidPaymentStatusException(Status, "Liberar saldo retenido");
+
+        Status = PaymentStatus.Refunded;
+        UpdatedAt = DateTime.UtcNow;
+
+        _transactions.Add(new PaymentTransaction(
+            Id,
+            "RELEASE",
+            Amount,
+            PaymentStatus.Refunded,
+            reference
+        ));
+    }
 }
 

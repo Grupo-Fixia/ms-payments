@@ -77,6 +77,9 @@ public class PaymentService : IPaymentService
         var payment = await GetVisiblePaymentAsync(paymentId, requester, ct);
         if (!requester.IsPayerOf(payment))
             throw new PaymentAccessDeniedException("Solo quien paga puede procesar el cobro de este pago.");
+        if (payment.IsWalletPayment)
+            throw new PaymentConflictException(
+                "Un pago con billetera no se cobra por la pasarela: se retiene al contratar y se cobra al cerrar el servicio.");
 
         var preRef = $"TX-{Guid.NewGuid():N}";
         payment.MarkAsProcessing(preRef);
@@ -125,40 +128,6 @@ public class PaymentService : IPaymentService
         if (payment == null || !requester.CanView(payment))
             throw PaymentNotFoundException.ForServiceRequest(serviceRequestId);
 
-        return payment.ToResponse();
-    }
-
-    public async Task<PaymentResponse> RefundPaymentAsync(Guid paymentId, Requester requester, string? reason = null,
-        CancellationToken ct = default)
-    {
-        _logger.LogInformation("Iniciando solicitud de reembolso para el pago '{PaymentId}'.", paymentId);
-
-        if (!requester.IsAdmin)
-            throw new PaymentAccessDeniedException("Solo un administrador de Fixia puede reembolsar un pago.");
-
-        var payment = await _paymentRepository.GetByIdAsync(paymentId, ct);
-        if (payment == null)
-            throw new PaymentNotFoundException(paymentId);
-
-        var refundRef = $"REF-{Guid.NewGuid():N}";
-        var gatewayResult = await _paymentGateway.ProcessRefundAsync(
-            payment.Id,
-            payment.TransactionReference ?? payment.Id.ToString(),
-            payment.Amount,
-            ct);
-
-        if (!gatewayResult.IsSuccess)
-        {
-            throw new PaymentDomainException($"La pasarela de pago denegó el reembolso: {gatewayResult.ErrorMessage}");
-        }
-
-        payment.Refund(refundRef, gatewayResult.RawResponse);
-        _paymentRepository.Update(payment);
-        await _outbox.EnqueueAsync(PaymentEvents.PaymentRefunded(payment,
-            new EventActor(requester.UserId, requester.ActorRole), refundRef, reason), ct);
-        await _unitOfWork.SaveChangesAsync(ct);
-
-        _logger.LogInformation("Reembolso del pago '{PaymentId}' completado exitosamente.", payment.Id);
         return payment.ToResponse();
     }
 

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/payments/pago.procesado.v1.schema.json",
+  "title": "pago.procesado (versión 1)",
+  "description": "Con billetera: el total (precio + comisión) quedó RETENIDO en la billetera del cliente al contratar (GC-484). El servicio ya puede iniciar (GC-490). Una repetición del evento de contratación no retiene dos veces ni publica otro.",
+  "allOf": [{ "$ref": "envelope.v1.schema.json" }],
+  "properties": {
+    "eventType": { "const": "pago.procesado" },
+    "schemaVersion": { "const": 1 },
+    "data": {
+      "type": "object",
+      "required": ["paymentId", "serviceRequestId", "contractId", "clientId", "providerId", "amount", "breakdown", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "paymentId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "serviceRequestId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "contractId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "clientId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "providerId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "amount": { "$ref": "common.v1.schema.json#/$defs/money", "description": "Total retenido." },
+        "breakdown": { "$ref": "common.v1.schema.json#/$defs/breakdown" },
+        "status": { "const": "Processing" }
+      }
+    }
+  }
+}

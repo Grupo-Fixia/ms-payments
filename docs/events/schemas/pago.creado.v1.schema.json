@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/payments/pago.creado.v1.schema.json",
+  "title": "pago.creado (versión 1)",
+  "description": "Se registró un pago para una solicitud de servicio. Con billetera lleva contractId y el desglose; un pago anterior por la ruta interna no los trae. Un reintento con los mismos datos no publica otro.",
+  "allOf": [{ "$ref": "envelope.v1.schema.json" }],
+  "properties": {
+    "eventType": { "const": "pago.creado" },
+    "schemaVersion": { "const": 1 },
+    "data": {
+      "type": "object",
+      "required": ["paymentId", "serviceRequestId", "clientId", "providerId", "amount", "method", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "paymentId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "serviceRequestId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "contractId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "clientId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "providerId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "amount": { "$ref": "common.v1.schema.json#/$defs/money", "description": "Total que paga el cliente." },
+        "method": { "$ref": "common.v1.schema.json#/$defs/paymentMethod" },
+        "breakdown": { "$ref": "common.v1.schema.json#/$defs/breakdown" },
+        "status": { "const": "Pending" }
+      }
+    }
+  }
+}

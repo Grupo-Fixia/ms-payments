@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/payments/pago.reembolsado.v1.schema.json",
+  "title": "pago.reembolsado (versión 1)",
+  "description": "Un administrador de Fixia devolvió el pago (GC-487). kind dice cómo: RELEASE (se liberó lo retenido, el pago no se había cobrado), REVERSAL (se revirtió un pago con billetera ya cobrado) o GATEWAY (reembolso por la pasarela de un pago sin billetera). Repetir la operación con la misma Idempotency-Key no publica otro.",
+  "allOf": [{ "$ref": "envelope.v1.schema.json" }],
+  "properties": {
+    "eventType": { "const": "pago.reembolsado" },
+    "schemaVersion": { "const": 1 },
+    "actor": {
+      "properties": { "role": { "const": "ADMIN" } }
+    },
+    "data": {
+      "type": "object",
+      "required": ["paymentId", "serviceRequestId", "amount", "refundReference", "reason", "kind", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "paymentId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "serviceRequestId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "amount": { "$ref": "common.v1.schema.json#/$defs/money", "description": "Total devuelto al cliente." },
+        "refundReference": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "kind": { "type": "string", "enum": ["RELEASE", "REVERSAL", "GATEWAY"] },
+        "breakdown": { "$ref": "common.v1.schema.json#/$defs/breakdown" },
+        "status": { "const": "Refunded" }
+      }
+    }
+  }
+}
