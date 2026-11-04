@@ -1,37 +1,70 @@
-## .NET / C# ignores
-[Bb]in/
-[Oo]bj/
-[Ll]og/
-[Ll]ogs/
-.vs/
-*.user
-*.userosscache
-*.sln.docstates
-*.suo
+## .NET / C# standard gitignore
+## https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
-# Build results
+## Build results
 [Dd]ebug/
+[Dd]ebugPublic/
 [Rr]elease/
+[Rr]eleases/
 x64/
 x86/
-[Aa]rms/
+[Aa]rm/
 [Aa]rm64/
 bld/
 [Bb]in/
 [Oo]bj/
-_UpgradeReport_Files/
+[Ll]og/
+[Ll]ogs/
 
-# Rider / JetBrains
+## Visual Studio / Roslyn / User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+.vsidx/
+
+## Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+## NuGet Packages
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+
+## User Secrets & Local Config
+appsettings.Local.json
+*.secrets.json
+
+## Rider / JetBrains
 .idea/
 *.sln.iml
 
-# Visual Studio Code
-.vscode/
+## Visual Studio Code
+.vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
 
-# OS files
+## Crash dumps and logs
+*.dmp
+*.mdmp
+*.crashdump
+*.log
+
+## OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db

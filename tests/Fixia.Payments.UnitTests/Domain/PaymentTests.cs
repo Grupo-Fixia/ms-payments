@@ -9,6 +9,33 @@ namespace Fixia.Payments.UnitTests.Domain;
 public class PaymentTests
 {
     [Fact]
+    public void ReleaseHold_OfAHeldWalletPayment_ShouldRefundIt_AndOnlyFromHeld()
+    {
+        // GC-487: con billetera, Processing significa retenido.
+        var rule = new CommissionRule(Guid.NewGuid(), 0.15m, DateTime.UtcNow.AddDays(-1), null, "15 %", DateTime.UtcNow);
+        var payment = Payment.ForContract(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            rule.Quote(105000m, "COP"));
+
+        FluentActions.Invoking(() => payment.ReleaseHold("REF-0")).Should().Throw<InvalidPaymentStatusException>();
+
+        payment.MarkAsProcessing("HOLD-1");
+        payment.ReleaseHold("REF-1");
+
+        payment.Status.Should().Be(PaymentStatus.Refunded);
+        payment.Transactions.Last().TransactionType.Should().Be("RELEASE");
+        FluentActions.Invoking(() => payment.ReleaseHold("REF-2")).Should().Throw<InvalidPaymentStatusException>();
+    }
+
+    [Fact]
+    public void ReleaseHold_OfAPaymentWithoutWallet_ShouldBeRejected()
+    {
+        var payment = new Payment(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 50000m, "COP", PaymentMethod.CreditCard);
+        payment.MarkAsProcessing("TX-1");
+
+        FluentActions.Invoking(() => payment.ReleaseHold("REF-1")).Should().Throw<PaymentDomainException>();
+    }
+
+    [Fact]
     public void CreatePayment_WithValidData_ShouldInitializeInPendingStatus()
     {
         // Arrange

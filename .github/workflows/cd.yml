@@ -1,0 +1,38 @@
+name: cd
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [Qa]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-qa-ms-payments
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: [self-hosted, qa]
+    env:
+      KUBECONFIG: /home/estudiante/.kube/deployer.yaml
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Deploy application
+        run: |
+          export IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:${HEAD_SHA:0:12}"
+          echo "Desplegando la imagen: $IMAGE"
+          envsubst '${IMAGE}' < deploy/ms-payments.yaml | kubectl apply -f -
+
+      - name: Wait for rollout
+        run: kubectl -n apps rollout status deployment/ms-payments --timeout=240s
+

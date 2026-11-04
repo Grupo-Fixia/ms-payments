@@ -1,4 +1,6 @@
+using Fixia.Payments.Application.Common.Events;
 using Fixia.Payments.Application.Common.Interfaces;
+using Fixia.Payments.Application.Common.Security;
 using Fixia.Payments.Application.DTOs;
 using Fixia.Payments.Domain.Entities;
 using Fixia.Payments.Domain.Exceptions;
@@ -6,38 +8,79 @@ using Microsoft.Extensions.Logging;
 
 namespace Fixia.Payments.Application.Services;
 
+/// <summary>
+/// Casos de uso de pagos. Desde GC-477 los eventos se escriben en el Outbox dentro del mismo <c>SaveChangesAsync</c>
+/// que el cambio (nunca antes de confirmarlo) y cada operación comprueba quién la pide.
+/// </summary>
 public class PaymentService : IPaymentService
 {
     private readonly IPaymentRepository _paymentRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPaymentGateway _paymentGateway;
-    private readonly IEventPublisher _eventPublisher;
+    private readonly IBusinessEventOutbox _outbox;
+    private readonly IWalletRepository _wallets;
     private readonly ILogger<PaymentService> _logger;
+    private readonly TimeProvider _clock;
 
     public PaymentService(
         IPaymentRepository paymentRepository,
         IUnitOfWork unitOfWork,
         IPaymentGateway paymentGateway,
-        IEventPublisher eventPublisher,
-        ILogger<PaymentService> logger)
+        IBusinessEventOutbox outbox,
+        IWalletRepository wallets,
+        ILogger<PaymentService> logger,
+        TimeProvider? clock = null)
     {
         _paymentRepository = paymentRepository;
         _unitOfWork = unitOfWork;
         _paymentGateway = paymentGateway;
-        _eventPublisher = eventPublisher;
+        _outbox = outbox;
+        _wallets = wallets;
         _logger = logger;
+        _clock = clock ?? TimeProvider.System;
     }
 
-    public async Task<PaymentResponse> CreatePaymentAsync(CreatePaymentRequest request, CancellationToken ct = default)
+    /// <summary>
+    /// Pago con billetera (GC-484): nunca pasa por la pasarela. Si la retención al contratar falló por saldo, el cliente
+    /// recarga y reintenta aquí; si alcanza, se retiene el total y se publica <c>pago.procesado</c>. Si sigue sin
+    /// alcanzar responde 409 y el pago sigue <c>Failed</c>. Un pago ya retenido o cerrado no se reintenta (409).
+    /// </summary>
+    private async Task<PaymentResponse> RetryHoldAsync(Payment payment, Requester requester, CancellationToken ct)
     {
-        _logger.LogInformation("Creando intención de pago para ServiceRequest '{ServiceRequestId}' y Cliente '{ClientId}'.",
-            request.ServiceRequestId, request.ClientId);
+        if (payment.Status != Domain.Enums.PaymentStatus.Failed)
+            throw new PaymentConflictException(
+                "Este pago con billetera no tiene una retención fallida que reintentar: se retiene al contratar y se cobra al cerrar el servicio.");
 
-        // Verificar si ya existe un pago previo para esta solicitud de servicio
+        var wallet = await _wallets.GetByOwnerAsync(payment.ClientId, payment.Currency, ct);
+        var (hold, failure) = WalletSettlement.TryHold(payment, wallet, _clock.GetUtcNow().UtcDateTime);
+        if (hold is null)
+            throw new InsufficientBalanceException(failure!);
+
+        await _wallets.AddEntryAsync(hold, ct);
+        _paymentRepository.Update(payment);
+        await _outbox.EnqueueAsync(PaymentEvents.PaymentHeld(payment, new EventActor(requester.UserId, requester.ActorRole)), ct);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Retención del pago '{PaymentId}' reintentada con éxito.", payment.Id);
+        return payment.ToResponse(requester);
+    }
+
+    public async Task<CreatePaymentResult> CreatePaymentAsync(CreatePaymentRequest request, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Creando intención de pago para ServiceRequest '{ServiceRequestId}'.", request.ServiceRequestId);
+
+        // Un solo pago por solicitud (índice único). Repetir la misma petición es un reintento y devuelve el existente.
         var existing = await _paymentRepository.GetByServiceRequestIdAsync(request.ServiceRequestId, ct);
-        if (existing != null && existing.Status == Domain.Enums.PaymentStatus.Completed)
+        if (existing != null)
         {
-            throw new PaymentDomainException($"La solicitud de servicio '{request.ServiceRequestId}' ya cuenta con un pago completado.");
+            if (IsSameRequest(existing, request))
+            {
+                _logger.LogInformation("Reintento de creación: el pago '{PaymentId}' ya existía.", existing.Id);
+                return new CreatePaymentResult(existing.ToResponse(), Created: false);
+            }
+
+            throw new PaymentConflictException(
+                $"La solicitud de servicio '{request.ServiceRequestId}' ya tiene un pago registrado con otros datos.");
         }
 
         var payment = new Payment(
@@ -50,34 +93,23 @@ public class PaymentService : IPaymentService
         );
 
         await _paymentRepository.AddAsync(payment, ct);
+        await _outbox.EnqueueAsync(PaymentEvents.PaymentCreated(payment, EventActor.System), ct);
         await _unitOfWork.SaveChangesAsync(ct);
 
         _logger.LogInformation("Pago registrado exitosamente con ID '{PaymentId}'.", payment.Id);
-
-        await _eventPublisher.PublishAsync(
-            "fixia.payments.events",
-            "pago.creado",
-            new
-            {
-                PaymentId = payment.Id,
-                ServiceRequestId = payment.ServiceRequestId,
-                ClientId = payment.ClientId,
-                ProviderId = payment.ProviderId,
-                Amount = payment.Amount,
-                Status = payment.Status.ToString()
-            },
-            ct);
-
-        return payment.ToResponse();
+        return new CreatePaymentResult(payment.ToResponse(), Created: true);
     }
 
-    public async Task<PaymentResponse> ProcessPaymentAsync(Guid paymentId, ProcessPaymentRequest? request = null, CancellationToken ct = default)
+    public async Task<PaymentResponse> ProcessPaymentAsync(Guid paymentId, Requester requester,
+        ProcessPaymentRequest? request = null, CancellationToken ct = default)
     {
         _logger.LogInformation("Iniciando procesamiento de cobro para el pago '{PaymentId}'.", paymentId);
 
-        var payment = await _paymentRepository.GetByIdAsync(paymentId, ct);
-        if (payment == null)
-            throw new PaymentNotFoundException(paymentId);
+        var payment = await GetVisiblePaymentAsync(paymentId, requester, ct);
+        if (!requester.IsPayerOf(payment))
+            throw new PaymentAccessDeniedException("Solo quien paga puede procesar el cobro de este pago.");
+        if (payment.IsWalletPayment)
+            return await RetryHoldAsync(payment, requester, ct);
 
         var preRef = $"TX-{Guid.NewGuid():N}";
         payment.MarkAsProcessing(preRef);
@@ -91,114 +123,61 @@ public class PaymentService : IPaymentService
             payment.Method,
             ct);
 
+        var actor = new EventActor(requester.UserId, requester.ActorRole);
         if (gatewayResult.IsSuccess)
         {
             payment.MarkAsCompleted(gatewayResult.TransactionReference, gatewayResult.RawResponse);
+            await _outbox.EnqueueAsync(PaymentEvents.PaymentCompleted(payment, actor), ct);
             _logger.LogInformation("Pago '{PaymentId}' completado exitosamente con referencia '{Reference}'.",
                 payment.Id, gatewayResult.TransactionReference);
-
-            await _eventPublisher.PublishAsync(
-                "fixia.payments.events",
-                "pago.completado",
-                new
-                {
-                    PaymentId = payment.Id,
-                    ServiceRequestId = payment.ServiceRequestId,
-                    ClientId = payment.ClientId,
-                    ProviderId = payment.ProviderId,
-                    Amount = payment.Amount,
-                    TransactionReference = gatewayResult.TransactionReference,
-                    Status = "Completed"
-                },
-                ct);
         }
         else
         {
             var failureMsg = gatewayResult.ErrorMessage ?? "Error desconocido en la pasarela de pagos.";
             payment.MarkAsFailed(failureMsg, gatewayResult.RawResponse);
+            await _outbox.EnqueueAsync(PaymentEvents.PaymentFailed(payment, actor), ct);
             _logger.LogWarning("Pago '{PaymentId}' rechazado o fallido: {Reason}", payment.Id, failureMsg);
-
-            await _eventPublisher.PublishAsync(
-                "fixia.payments.events",
-                "pago.fallido",
-                new
-                {
-                    PaymentId = payment.Id,
-                    ServiceRequestId = payment.ServiceRequestId,
-                    ClientId = payment.ClientId,
-                    ProviderId = payment.ProviderId,
-                    Amount = payment.Amount,
-                    FailureReason = failureMsg,
-                    Status = "Failed"
-                },
-                ct);
         }
 
         _paymentRepository.Update(payment);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        return payment.ToResponse();
+        return payment.ToResponse(requester);
     }
 
-    public async Task<PaymentResponse> GetByIdAsync(Guid paymentId, CancellationToken ct = default)
+    public async Task<PaymentResponse> GetByIdAsync(Guid paymentId, Requester requester, CancellationToken ct = default)
     {
-        var payment = await _paymentRepository.GetByIdAsync(paymentId, ct);
-        if (payment == null)
-            throw new PaymentNotFoundException(paymentId);
-
-        return payment.ToResponse();
+        var payment = await GetVisiblePaymentAsync(paymentId, requester, ct);
+        return payment.ToResponse(requester);
     }
 
-    public async Task<PaymentResponse> GetByServiceRequestIdAsync(Guid serviceRequestId, CancellationToken ct = default)
+    public async Task<PaymentResponse> GetByServiceRequestIdAsync(Guid serviceRequestId, Requester requester,
+        CancellationToken ct = default)
     {
         var payment = await _paymentRepository.GetByServiceRequestIdAsync(serviceRequestId, ct);
-        if (payment == null)
-            throw new PaymentDomainException($"No existe ningún pago asociado a la solicitud de servicio '{serviceRequestId}'.");
+        if (payment == null || !requester.CanView(payment))
+            throw PaymentNotFoundException.ForServiceRequest(serviceRequestId);
 
-        return payment.ToResponse();
+        return payment.ToResponse(requester);
     }
 
-    public async Task<PaymentResponse> RefundPaymentAsync(Guid paymentId, string? reason = null, CancellationToken ct = default)
+    /// <summary>Un pago ajeno responde igual que uno inexistente (404), para no revelar que existe.</summary>
+    private async Task<Payment> GetVisiblePaymentAsync(Guid paymentId, Requester requester, CancellationToken ct)
     {
-        _logger.LogInformation("Iniciando solicitud de reembolso para el pago '{PaymentId}'.", paymentId);
-
         var payment = await _paymentRepository.GetByIdAsync(paymentId, ct);
-        if (payment == null)
+        if (payment == null || !requester.CanView(payment))
             throw new PaymentNotFoundException(paymentId);
 
-        var refundRef = $"REF-{Guid.NewGuid():N}";
-        var gatewayResult = await _paymentGateway.ProcessRefundAsync(
-            payment.Id,
-            payment.TransactionReference ?? payment.Id.ToString(),
-            payment.Amount,
-            ct);
-
-        if (!gatewayResult.IsSuccess)
-        {
-            throw new PaymentDomainException($"La pasarela de pago denegó el reembolso: {gatewayResult.ErrorMessage}");
-        }
-
-        payment.Refund(refundRef, gatewayResult.RawResponse);
-        _paymentRepository.Update(payment);
-        await _unitOfWork.SaveChangesAsync(ct);
-
-        _logger.LogInformation("Reembolso del pago '{PaymentId}' completado exitosamente.", payment.Id);
-
-        await _eventPublisher.PublishAsync(
-            "fixia.payments.events",
-            "pago.reembolsado",
-            new
-            {
-                PaymentId = payment.Id,
-                ServiceRequestId = payment.ServiceRequestId,
-                Amount = payment.Amount,
-                RefundReference = refundRef,
-                Reason = reason,
-                Status = "Refunded"
-            },
-            ct);
-
-        return payment.ToResponse();
+        return payment;
     }
-}
 
+    private static bool IsSameRequest(Payment existing, CreatePaymentRequest request) =>
+        existing.ClientId == request.ClientId
+        && existing.ProviderId == request.ProviderId
+        && existing.Amount == request.Amount
+        && string.Equals(existing.Currency, NormalizeCurrency(request.Currency), StringComparison.Ordinal)
+        && existing.Method == request.Method;
+
+    private static string NormalizeCurrency(string currency) =>
+        string.IsNullOrWhiteSpace(currency) ? "COP" : currency.ToUpperInvariant();
+}

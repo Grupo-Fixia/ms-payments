@@ -1,11 +1,21 @@
+using Fixia.Payments.Api.Security;
+using Fixia.Payments.Application.Common.Security;
 using Fixia.Payments.Application.DTOs;
 using Fixia.Payments.Application.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Fixia.Payments.Api.Controllers;
 
+/// <summary>
+/// API pública de pagos, detrás de Traefik. Desde GC-477 exige el token de ms-users en todas sus rutas: cada usuario
+/// ve solo los pagos en los que participa (un pago ajeno responde 404, igual que uno inexistente). La creación pasó a
+/// la ruta interna (<see cref="InternalPaymentsController"/>), porque la hace otro microservicio y no el usuario.
+/// </summary>
 [ApiController]
 [Route("api/payments")]
+[Authorize]
+[ProducesResponseType(StatusCodes.Status401Unauthorized)]
 public class PaymentsController : ControllerBase
 {
     private readonly IPaymentService _paymentService;
@@ -18,65 +28,64 @@ public class PaymentsController : ControllerBase
     }
 
     /// <summary>
-    /// Crea una nueva intención o registro de pago
-    /// </summary>
-    [HttpPost]
-    [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> CreatePayment([FromBody] CreatePaymentRequest request, CancellationToken ct)
-    {
-        var response = await _paymentService.CreatePaymentAsync(request, ct);
-        return CreatedAtAction(nameof(GetById), new { id = response.Id }, response);
-    }
-
-    /// <summary>
-    /// Procesa el cobro de un pago existente
+    /// Procesa el cobro de un pago existente. Solo lo puede hacer quien figura como pagador.
     /// </summary>
     [HttpPost("{id:guid}/process")]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> ProcessPayment(Guid id, [FromBody] ProcessPaymentRequest? request, CancellationToken ct)
     {
-        var response = await _paymentService.ProcessPaymentAsync(id, request, ct);
+        var response = await _paymentService.ProcessPaymentAsync(id, User.ToRequester(), request, ct);
         return Ok(response);
     }
 
     /// <summary>
-    /// Consulta el detalle de un pago por su ID
+    /// Consulta el detalle de un pago por su ID. Lo ven el pagador, el prestador y un administrador de Fixia.
     /// </summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
-        var response = await _paymentService.GetByIdAsync(id, ct);
+        var response = await _paymentService.GetByIdAsync(id, User.ToRequester(), ct);
         return Ok(response);
     }
 
     /// <summary>
-    /// Consulta el pago asociado a una solicitud de servicio específica
+    /// Consulta el pago asociado a una solicitud de servicio específica, con las mismas reglas de visibilidad.
     /// </summary>
     [HttpGet("service-request/{serviceRequestId:guid}")]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetByServiceRequestId(Guid serviceRequestId, CancellationToken ct)
     {
-        var response = await _paymentService.GetByServiceRequestIdAsync(serviceRequestId, ct);
+        var response = await _paymentService.GetByServiceRequestIdAsync(serviceRequestId, User.ToRequester(), ct);
         return Ok(response);
     }
 
     /// <summary>
-    /// Procesa el reembolso de un pago completado
+    /// Reembolso autorizado (GC-487), solo un administrador de Fixia. Con billetera: si el pago está retenido libera el
+    /// total al cliente; si ya se cobró, lo revierte (prestador y Fixia devuelven, el cliente recibe) o responde 409 si
+    /// no se puede sin dejar saldos negativos. Exige <c>reason</c> e <c>Idempotency-Key</c>: repetirlo no devuelve dos
+    /// veces (responde lo mismo con <c>Idempotent-Replayed: true</c>).
     /// </summary>
     [HttpPost("{id:guid}/refund")]
+    [Authorize(Roles = Requester.RoleAdmin)]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Refund(Guid id, [FromQuery] string? reason, CancellationToken ct)
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Refund(Guid id, [FromQuery] string? reason,
+        [FromHeader(Name = WalletsController.IdempotencyKeyHeader)] string? idempotencyKey,
+        [FromServices] IPaymentRefundService refunds, CancellationToken ct)
     {
-        var response = await _paymentService.RefundPaymentAsync(id, reason, ct);
-        return Ok(response);
+        var result = await refunds.RefundAsync(id, User.ToRequester(), reason, idempotencyKey, ct);
+        if (result.Replayed)
+            Response.Headers[WalletsController.ReplayedHeader] = "true";
+        return Ok(result.Value);
     }
 }
-
