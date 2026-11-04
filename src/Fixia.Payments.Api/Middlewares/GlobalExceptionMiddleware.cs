@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using Fixia.Payments.Domain.Exceptions;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Fixia.Payments.Api.Middlewares;
@@ -48,6 +50,36 @@ public class GlobalExceptionMiddleware
                 title = "Transición de estado de pago inválida";
                 detail = invalidStatus.Message;
                 _logger.LogWarning("Conflicto de estado de pago: {Message}", invalidStatus.Message);
+                break;
+
+            case PaymentAccessDeniedException accessDenied:
+                statusCode = HttpStatusCode.Forbidden;
+                title = "Acceso denegado";
+                detail = accessDenied.Message;
+                _logger.LogWarning("Operación de pago no permitida: {Message}", accessDenied.Message);
+                break;
+
+            case PaymentConflictException conflict:
+                statusCode = HttpStatusCode.Conflict;
+                title = "Conflicto con un pago existente";
+                detail = conflict.Message;
+                _logger.LogWarning("Conflicto de pago: {Message}", conflict.Message);
+                break;
+
+            // Otra operación cambió el mismo pago al mismo tiempo (bloqueo optimista, GC-477).
+            case DbUpdateConcurrencyException:
+                statusCode = HttpStatusCode.Conflict;
+                title = "Modificación concurrente";
+                detail = "El pago cambió mientras se procesaba la solicitud. Consúltelo de nuevo y reintente.";
+                _logger.LogWarning("Conflicto de concurrencia sobre un pago en {Path}", context.Request.Path);
+                break;
+
+            // Restricción única violada por dos creaciones simultáneas de la misma solicitud (GC-477).
+            case DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } }:
+                statusCode = HttpStatusCode.Conflict;
+                title = "Conflicto con un pago existente";
+                detail = "La solicitud de servicio ya tiene un pago registrado.";
+                _logger.LogWarning("Violación de unicidad al guardar un pago en {Path}", context.Request.Path);
                 break;
 
             case PaymentDomainException domainEx:

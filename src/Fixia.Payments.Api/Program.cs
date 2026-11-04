@@ -1,8 +1,8 @@
 using Fixia.Payments.Api.Middlewares;
+using Fixia.Payments.Api.Security;
 using Fixia.Payments.Application.Services;
 using Fixia.Payments.Infrastructure;
 using Fixia.Payments.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,7 +15,10 @@ builder.Logging.AddConsole();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 builder.Services.AddScoped<IPaymentService, PaymentService>();
 
-// 2. Controladores y Serialización JSON
+// 2. Seguridad: token de ms-users en /api/payments y clave interna en /internal (GC-477)
+builder.Services.AddFixiaSecurity(builder.Configuration, builder.Environment);
+
+// 3. Controladores y Serialización JSON
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -31,30 +34,35 @@ builder.Services.AddSwaggerGen(c =>
         Version = "v1",
         Description = "Microservicio de gestión y procesamiento de pagos de Fixia en .NET 8."
     });
+
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        Description = "Access token de ms-users (POST /api/users/auth/login)."
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            },
+            Array.Empty<string>()
+        }
+    });
 });
 
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
-// 3. Inicialización / Migración de Base de Datos
-using (var scope = app.Services.CreateScope())
-{
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    try
-    {
-        var db = scope.ServiceProvider.GetRequiredService<PaymentsDbContext>();
-        logger.LogInformation("Verificando y aplicando esquema de base de datos para ms-payments...");
-        db.Database.EnsureCreated();
-        logger.LogInformation("Esquema de base de datos de ms-payments verificado exitosamente.");
-    }
-    catch (Exception ex)
-    {
-        logger.LogWarning(ex, "No fue posible conectar o inicializar la base de datos inmediatamente. Se continuará con reintentos.");
-    }
-}
+// 4. Migraciones versionadas de EF Core (GC-477): reemplazan a EnsureCreated()
+await DatabaseMigrator.ApplyMigrationsAsync(app.Services, app.Configuration,
+    app.Services.GetRequiredService<ILogger<Program>>());
 
-// 4. Pipeline HTTP
+// 5. Pipeline HTTP
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
 // Swagger habilitado tanto en desarrollo como a través de API Gateway
@@ -70,6 +78,14 @@ app.UseSwaggerUI(c =>
 
 app.UseRouting();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapControllers();
 
 app.Run();
+
+/// <summary>Visible para las pruebas de integración (<c>WebApplicationFactory&lt;Program&gt;</c>).</summary>
+public partial class Program
+{
+}
