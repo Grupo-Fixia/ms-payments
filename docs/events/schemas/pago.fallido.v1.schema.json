@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/payments/pago.fallido.v1.schema.json",
+  "title": "pago.fallido (versión 1)",
+  "description": "El pago no se pudo hacer. Con billetera: al contratar no alcanzó el saldo disponible y no se retuvo nada; el cliente recarga y reintenta (GC-484). Sin billetera: la pasarela rechazó el cobro.",
+  "allOf": [{ "$ref": "envelope.v1.schema.json" }],
+  "properties": {
+    "eventType": { "const": "pago.fallido" },
+    "schemaVersion": { "const": 1 },
+    "data": {
+      "type": "object",
+      "required": ["paymentId", "serviceRequestId", "clientId", "providerId", "amount", "failureReason", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "paymentId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "serviceRequestId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "contractId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "clientId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "providerId": { "$ref": "common.v1.schema.json#/$defs/uuid" },
+        "amount": { "$ref": "common.v1.schema.json#/$defs/money" },
+        "failureReason": { "type": ["string", "null"], "maxLength": 500, "description": "Motivo legible; nunca datos de tarjeta ni la respuesta cruda de la pasarela." },
+        "breakdown": { "$ref": "common.v1.schema.json#/$defs/breakdown" },
+        "status": { "const": "Failed" }
+      }
+    }
+  }
+}

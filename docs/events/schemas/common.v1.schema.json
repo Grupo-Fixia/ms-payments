@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/payments/common.v1.schema.json",
+  "title": "Tipos comunes de los eventos de ms-payments",
+  "description": "Mismas reglas que los tipos comunes de ms-services (uuid, instante UTC, dinero como texto con dos decimales), con un $id propio para que el lakehouse cargue ambos sin colisión (GC-488).",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "instant": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+      "description": "Instante en UTC con Z. ms-payments escribe microsegundos (2026-11-02T20:02:55.536580Z)."
+    },
+    "money": {
+      "type": "object",
+      "description": "Valor monetario mayor que cero. El importe viaja como texto con dos decimales para que ningún consumidor lo convierta a punto flotante.",
+      "required": ["amount", "currency"],
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "type": "string",
+          "pattern": "^(0\\.(0[1-9]|[1-9][0-9])|[1-9][0-9]{0,15}\\.[0-9]{2})$"
+        },
+        "currency": { "type": "string", "enum": ["COP"] }
+      }
+    },
+    "moneyOrZero": {
+      "type": "object",
+      "description": "Como money, pero admite 0.00 (una comisión puede redondear a cero en precios muy pequeños).",
+      "required": ["amount", "currency"],
+      "additionalProperties": false,
+      "properties": {
+        "amount": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,15})\\.[0-9]{2}$" },
+        "currency": { "type": "string", "enum": ["COP"] }
+      }
+    },
+    "paymentStatus": {
+      "type": "string",
+      "enum": ["Pending", "Processing", "Completed", "Failed", "Refunded"],
+      "description": "Estado del pago. Con billetera, Processing significa que el total quedó retenido."
+    },
+    "paymentMethod": {
+      "type": "string",
+      "enum": ["CreditCard", "DebitCard", "BankTransfer", "Wallet"]
+    },
+    "breakdown": {
+      "type": "object",
+      "description": "Desglose de un pago con billetera (GC-480): el cliente paga price + commission y el prestador recibe price íntegro.",
+      "required": ["price", "commission", "rate", "ruleId"],
+      "additionalProperties": false,
+      "properties": {
+        "price": { "$ref": "#/$defs/money" },
+        "commission": { "$ref": "#/$defs/moneyOrZero" },
+        "rate": { "type": "string", "pattern": "^0\\.[0-9]{4}$", "description": "Tarifa aplicada como fracción con 4 decimales: 0.1500 es 15 %." },
+        "ruleId": { "$ref": "#/$defs/uuid" }
+      }
+    }
+  }
+}
