@@ -25,7 +25,7 @@ ms-payments/
 | Método | Endpoint | Quién | Descripción |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/internal/payments` | Otro microservicio (`X-Internal-Api-Key`) | Registra el pago de una solicitud de servicio. Idempotente: el mismo pedido repetido responde 200 con el pago existente; otros datos para la misma solicitud, 409. No pasa por Traefik. |
-| `POST` | `/api/payments/{id}/process` | El pagador del pago | Procesa el cobro a través de la pasarela de pagos. |
+| `POST` | `/api/payments/{id}/process` | El pagador del pago | Sin billetera: procesa el cobro por la pasarela. Con billetera: **reintenta la retención** que falló por saldo, después de recargar (GC-484); si sigue sin alcanzar, 409. |
 | `GET` | `/api/payments/{id}` | Pagador, prestador o `ROLE_ADMIN` | Obtiene el detalle de un pago y su historial de transacciones. |
 | `GET` | `/api/payments/service-request/{serviceRequestId}` | Pagador, prestador o `ROLE_ADMIN` | Obtiene el pago asociado a una solicitud de servicio. |
 | `POST` | `/api/payments/{id}/refund?reason=` | `ROLE_ADMIN` | Reembolso autorizado con motivo obligatorio e `Idempotency-Key` (GC-487). Con billetera: si está retenido libera el total al cliente; si ya se cobró, lo revierte (prestador y Fixia devuelven, el cliente recibe) o responde 409 sin cambiar nada si no alcanza. Sin billetera: por la pasarela. |
@@ -34,6 +34,16 @@ ms-payments/
 | `POST` | `/api/payments/wallets/me/top-ups` | `ROLE_CLIENT` | Recarga simulada (`{"amount": 50000}`) con la cabecera `Idempotency-Key`; 201 con el movimiento y los saldos (GC-482). |
 | `POST` | `/api/payments/wallets/me/withdrawals` | `ROLE_PROFESSIONAL`, `ROLE_COMPANY` | Retiro simulado del saldo disponible (nunca del retenido), con `Idempotency-Key` (GC-483). |
 | `GET` | `/api/payments/commission-quote?amount=&currency=` | Cualquier usuario autenticado | Precio, comisión de Fixia y total con la tarifa vigente, para mostrarlo antes de aceptar la cotización (GC-471, criterio 1). No guarda nada. |
+
+**Respuesta del pago y retención (GC-491).** Además de `status` y `method`, cada pago responde estos campos, para que el cliente no tenga que deducir la retención:
+
+| Campo | Significado |
+|---|---|
+| `isWalletPayment` | `true` si es un pago con billetera con desglose (los que crea `servicio.contratado`). `method = Wallet` por sí solo no basta. |
+| `contractId` | Contrato de ms-services que originó el pago (con billetera). |
+| `breakdown` | `{price, commission, commissionRate, total}`: lo que recibe el prestador, la comisión de Fixia, la tarifa aplicada y lo que paga el cliente. `null` sin billetera. |
+| `holdStatus` | `NotApplicable` (sin billetera), `Pending`, `Held` (retenido), `Failed` (no se pudo retener), `Captured` (cobrado al cerrar), `Released` (liberado por un administrador) o `Reversed` (revertido después del cobro). |
+| `canRetryHold` | `true` solo si la retención falló **y** quien consulta es el cliente que paga: es cuando `POST /{id}/process` puede reintentarla. |
 | `GET` | `/api/payments/health` | Público | Health check del microservicio (también `/actuator/health`). |
 | `GET` | `/api/payments/swagger` | Público | Documentación interactiva OpenAPI/Swagger (botón *Authorize* para el token). |
 
@@ -86,7 +96,7 @@ Los movimientos los crean la recarga y el retiro (GC-482, GC-483) y los crearán
 
 ## 🗄️ Migraciones (GC-477)
 
-El esquema se crea con **migraciones versionadas de EF Core** (`src/Fixia.Payments.Infrastructure/Persistence/Migrations`), ya no con `EnsureCreated()`. La primera, `InitialCreate`, crea `payments` (con un pago por solicitud), `payment_transactions` y `outbox_events`; la segunda, `AddWallets` (GC-480), crea `wallets`, `wallet_entries` y `commission_rules`, siembra la cuenta de Fixia y la tarifa de 15 %, y agrega el desglose a `payments`; la tercera, `AddIdempotencyKeys` (GC-482/483), crea `idempotency_keys`.
+El esquema se crea con **migraciones versionadas de EF Core** (`src/Fixia.Payments.Infrastructure/Persistence/Migrations`), ya no con `EnsureCreated()`. La primera, `InitialCreate`, crea `payments` (con un pago por solicitud), `payment_transactions` y `outbox_events`; la segunda, `AddWallets` (GC-480), crea `wallets`, `wallet_entries` y `commission_rules`, siembra la cuenta de Fixia y la tarifa de 15 %, y agrega el desglose a `payments`; la tercera, `AddIdempotencyKeys` (GC-482/483), crea `idempotency_keys`; la cuarta, `AddProcessedEvents` (GC-484/485), crea `processed_events`.
 
 ```bash
 dotnet tool restore                                   # instala dotnet-ef 8.0.11 (herramienta local)
@@ -98,6 +108,20 @@ dotnet ef migrations script -p src/Fixia.Payments.Infrastructure -s src/Fixia.Pa
 - Para QA se puede desactivar con `Database__ApplyMigrationsOnStartup=false` y aplicarlas antes del despliegue con un *bundle*: `dotnet ef migrations bundle -p src/Fixia.Payments.Infrastructure -s src/Fixia.Payments.Infrastructure -o efbundle` y luego `./efbundle --connection "<cadena>"`.
 - Si la base quedó con las tablas que creaba `EnsureCreated()` en la versión anterior: vacías, se reemplazan solas; con datos, el servicio no arranca y lo explica en el log (no borra nada).
 - La prueba `MigrationsTests` falla si alguien cambia el modelo y olvida generar la migración.
+
+## 🔄 Retener al contratar y cobrar al cerrar (GC-484, GC-485)
+
+`ms-payments` consume `fixia.services.service-requests` (los hechos que publica el relay de ms-services, GC-434), grupo `ms-payments`, por coreografía y sin orquestador:
+
+| Evento de ms-services | Efecto en ms-payments | Eventos que publica |
+| :--- | :--- | :--- |
+| `servicio.contratado` | Registra el pago con billetera: precio + comisión vigente (15 %) a cargo del cliente. Si el disponible alcanza, **retiene** el total; si no, el pago queda `Failed` sin mover nada y el cliente recarga y reintenta con `POST /{id}/process` | `pago.creado` + `pago.procesado` (o `pago.fallido`) |
+| `servicio.cerrado` | **Cobra** lo retenido: el prestador recibe el precio íntegro y Fixia la comisión. Si no había pago retenido, no abona nada y lo deja en el log | `pago.completado` |
+| `servicio.cierre_objetado` | Nada: el total sigue retenido hasta el cierre o una liberación del administrador (GC-487) | — |
+
+- Todo el efecto (pago, saldos, movimientos, eventos del Outbox y la marca en `processed_events`) se guarda en una sola transacción. El offset se confirma después de guardar: un evento repetido (mismo `eventId`) no retiene ni cobra dos veces, y si la base falla el mensaje se reintenta.
+- Un mensaje que no cumple el contrato se registra en el log (sin su contenido) y se salta.
+- Configuración: `ServiceEvents__ConsumerEnabled`, `ServiceEvents__Topic`, `ServiceEvents__GroupId` y `ServiceEvents__RetryDelayMilliseconds`; usa el mismo `Kafka__BootstrapServers`.
 
 ## 📨 Eventos (GC-477)
 

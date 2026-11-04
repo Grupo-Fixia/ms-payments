@@ -39,6 +39,7 @@ public class PostgresPersistenceTests : IClassFixture<PostgresDatabase>
         new UnitOfWork(db),
         new MockPaymentGateway(NullLogger<MockPaymentGateway>.Instance),
         new OutboxWriter(db),
+        new WalletRepository(db),
         NullLogger<PaymentService>.Instance);
 
     private static Payment NewPayment() =>

@@ -58,8 +58,8 @@ los de `ms-services` en el lakehouse.
 
 | `eventType` | Cuándo | `actor` | `data` (obligatorio · *opcional*) |
 | --- | --- | --- | --- |
-| `pago.creado` | Se registra el pago: por la ruta interna o, con billetera, al contratar (GC-484). Un reintento con los mismos datos no publica otro | `SYSTEM` | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `method`, `status=Pending` · *`contractId`, `breakdown`* |
-| `pago.procesado` | Con billetera: el total quedó **retenido** en la billetera del cliente al contratar (GC-484) | `SYSTEM` | `paymentId`, `serviceRequestId`, `contractId`, `clientId`, `providerId`, `amount`, `breakdown`, `status=Processing` |
+| `pago.creado` | Se registra el pago: por la ruta interna (`SYSTEM`) o, con billetera, al contratar (GC-484; el actor es el de `servicio.contratado`). Un reintento con los mismos datos no publica otro | `SYSTEM` o el cliente | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `method`, `status=Pending` · *`contractId`, `breakdown`* |
+| `pago.procesado` | Con billetera: el total quedó **retenido** en la billetera del cliente al contratar (GC-484) o al reintentar después de recargar | Quien actuó en `servicio.contratado` (el cliente) o el cliente que reintenta | `paymentId`, `serviceRequestId`, `contractId`, `clientId`, `providerId`, `amount`, `breakdown`, `status=Processing` |
 | `pago.completado` | Con billetera: se cobró lo retenido al confirmar el cierre (GC-485). Sin billetera: la pasarela aprobó el cobro | `SYSTEM` o el pagador | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `transactionReference`, `status=Completed` · *`contractId`, `breakdown`* |
 | `pago.fallido` | Con billetera: no alcanzó el saldo al contratar (no se retiene nada). Sin billetera: la pasarela rechazó | `SYSTEM` o el pagador | `paymentId`, `serviceRequestId`, `clientId`, `providerId`, `amount`, `failureReason`, `status=Failed` · *`contractId`, `breakdown`* |
 | `pago.reembolsado` | Un administrador devuelve el pago (GC-487) | `ADMIN` | `paymentId`, `serviceRequestId`, `amount`, `refundReference`, `reason`, `kind`, `status=Refunded` · *`breakdown`* |

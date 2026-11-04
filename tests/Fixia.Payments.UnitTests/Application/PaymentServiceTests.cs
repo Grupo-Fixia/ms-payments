@@ -40,6 +40,7 @@ public class PaymentServiceTests
             _unitOfWorkMock.Object,
             _paymentGatewayMock.Object,
             _outboxMock.Object,
+            new Mock<IWalletRepository>().Object,
             _loggerMock.Object
         );
     }

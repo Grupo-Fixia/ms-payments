@@ -18,6 +18,7 @@ builder.Services.AddScoped<IWalletService, WalletService>();
 builder.Services.AddScoped<ICommissionService, CommissionService>();
 builder.Services.AddScoped<IWalletOperationsService, WalletOperationsService>();
 builder.Services.AddScoped<IPaymentRefundService, PaymentRefundService>();
+builder.Services.AddScoped<IServiceEventsHandler, ServiceEventsHandler>();
 
 // 2. Seguridad: token de ms-users en /api/payments y clave interna en /internal (GC-477)
 builder.Services.AddFixiaSecurity(builder.Configuration, builder.Environment);

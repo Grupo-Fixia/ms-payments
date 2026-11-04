@@ -18,20 +18,51 @@ public class PaymentService : IPaymentService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPaymentGateway _paymentGateway;
     private readonly IBusinessEventOutbox _outbox;
+    private readonly IWalletRepository _wallets;
     private readonly ILogger<PaymentService> _logger;
+    private readonly TimeProvider _clock;
 
     public PaymentService(
         IPaymentRepository paymentRepository,
         IUnitOfWork unitOfWork,
         IPaymentGateway paymentGateway,
         IBusinessEventOutbox outbox,
-        ILogger<PaymentService> logger)
+        IWalletRepository wallets,
+        ILogger<PaymentService> logger,
+        TimeProvider? clock = null)
     {
         _paymentRepository = paymentRepository;
         _unitOfWork = unitOfWork;
         _paymentGateway = paymentGateway;
         _outbox = outbox;
+        _wallets = wallets;
         _logger = logger;
+        _clock = clock ?? TimeProvider.System;
+    }
+
+    /// <summary>
+    /// Pago con billetera (GC-484): nunca pasa por la pasarela. Si la retención al contratar falló por saldo, el cliente
+    /// recarga y reintenta aquí; si alcanza, se retiene el total y se publica <c>pago.procesado</c>. Si sigue sin
+    /// alcanzar responde 409 y el pago sigue <c>Failed</c>. Un pago ya retenido o cerrado no se reintenta (409).
+    /// </summary>
+    private async Task<PaymentResponse> RetryHoldAsync(Payment payment, Requester requester, CancellationToken ct)
+    {
+        if (payment.Status != Domain.Enums.PaymentStatus.Failed)
+            throw new PaymentConflictException(
+                "Este pago con billetera no tiene una retención fallida que reintentar: se retiene al contratar y se cobra al cerrar el servicio.");
+
+        var wallet = await _wallets.GetByOwnerAsync(payment.ClientId, payment.Currency, ct);
+        var (hold, failure) = WalletSettlement.TryHold(payment, wallet, _clock.GetUtcNow().UtcDateTime);
+        if (hold is null)
+            throw new InsufficientBalanceException(failure!);
+
+        await _wallets.AddEntryAsync(hold, ct);
+        _paymentRepository.Update(payment);
+        await _outbox.EnqueueAsync(PaymentEvents.PaymentHeld(payment, new EventActor(requester.UserId, requester.ActorRole)), ct);
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Retención del pago '{PaymentId}' reintentada con éxito.", payment.Id);
+        return payment.ToResponse(requester);
     }
 
     public async Task<CreatePaymentResult> CreatePaymentAsync(CreatePaymentRequest request, CancellationToken ct = default)
@@ -78,8 +109,7 @@ public class PaymentService : IPaymentService
         if (!requester.IsPayerOf(payment))
             throw new PaymentAccessDeniedException("Solo quien paga puede procesar el cobro de este pago.");
         if (payment.IsWalletPayment)
-            throw new PaymentConflictException(
-                "Un pago con billetera no se cobra por la pasarela: se retiene al contratar y se cobra al cerrar el servicio.");
+            return await RetryHoldAsync(payment, requester, ct);
 
         var preRef = $"TX-{Guid.NewGuid():N}";
         payment.MarkAsProcessing(preRef);
@@ -112,13 +142,13 @@ public class PaymentService : IPaymentService
         _paymentRepository.Update(payment);
         await _unitOfWork.SaveChangesAsync(ct);
 
-        return payment.ToResponse();
+        return payment.ToResponse(requester);
     }
 
     public async Task<PaymentResponse> GetByIdAsync(Guid paymentId, Requester requester, CancellationToken ct = default)
     {
         var payment = await GetVisiblePaymentAsync(paymentId, requester, ct);
-        return payment.ToResponse();
+        return payment.ToResponse(requester);
     }
 
     public async Task<PaymentResponse> GetByServiceRequestIdAsync(Guid serviceRequestId, Requester requester,
@@ -128,7 +158,7 @@ public class PaymentService : IPaymentService
         if (payment == null || !requester.CanView(payment))
             throw PaymentNotFoundException.ForServiceRequest(serviceRequestId);
 
-        return payment.ToResponse();
+        return payment.ToResponse(requester);
     }
 
     /// <summary>Un pago ajeno responde igual que uno inexistente (404), para no revelar que existe.</summary>
