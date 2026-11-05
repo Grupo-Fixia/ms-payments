@@ -72,31 +72,53 @@ public class WalletOperationsPostgresTests : IClassFixture<PostgresDatabase>
     }
 
     [SkippableFact]
-    public async Task DifferentKeysAtTheSameTime_ShouldNeverLoseOrInventMoney()
+    public async Task DifferentKeysAtTheSameTime_ShouldAllApplyWithoutLosingOrInventingMoney()
     {
+        // GC-501: antes 6 a 8 de 10 respondían 409; ahora el servicio reintenta y todas se aplican.
         RequireDatabase();
         var userId = Guid.NewGuid();
         await WithServiceAsync(s => s.TopUpAsync(Client(userId), "calentar", new WalletAmountRequest(1m)));
 
-        var outcomes = await Task.WhenAll(Enumerable.Range(0, 8).Select(i => Task.Run(async () =>
+        var results = await Task.WhenAll(Enumerable.Range(0, 10).Select(i => Task.Run(() =>
+            WithServiceAsync(s => s.TopUpAsync(Client(userId), $"k-{i}", new WalletAmountRequest(10000m))))));
+
+        results.Should().OnlyContain(r => !r.Replayed);
+        var state = await StateAsync(userId);
+        state.Available.Should().Be(1m + 10000m * 10);
+        state.Entries.Should().Be(11);
+        state.Keys.Should().Be(11);
+    }
+
+    [SkippableFact]
+    public async Task WithdrawalsAtTheSameTime_ShouldNeverOverdrawNorPassTheDailyLimit()
+    {
+        RequireDatabase();
+        var userId = Guid.NewGuid();
+        await using (var db = _database.NewContext())
+        {
+            var wallet = Fixia.Payments.Domain.Entities.Wallet.OpenForUser(userId, DateTime.UtcNow);
+            db.Wallets.Add(wallet);
+            db.WalletEntries.Add(wallet.Apply(Fixia.Payments.Domain.Enums.WalletEntryType.Credit, 10000m,
+                DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        var professional = new Requester(userId, new[] { Requester.RoleProfessional });
+
+        var outcomes = await Task.WhenAll(Enumerable.Range(0, 6).Select(i => Task.Run(async () =>
         {
             try
             {
-                await WithServiceAsync(s => s.TopUpAsync(Client(userId), $"k-{i}", new WalletAmountRequest(1000m)));
+                await WithServiceAsync(s => s.WithdrawAsync(professional, $"r-{i}", new WalletAmountRequest(100m)));
                 return true;
             }
-            catch (DbUpdateConcurrencyException)
+            catch (WithdrawalLimitExceededException)
             {
-                return false; // 409: el cliente reintenta con la misma clave
+                return false;
             }
         })));
 
-        var succeeded = outcomes.Count(ok => ok);
-        succeeded.Should().BeGreaterThan(0);
-        var state = await StateAsync(userId);
-        state.Available.Should().Be(1m + 1000m * succeeded);
-        state.Entries.Should().Be(1 + succeeded);
-        state.Keys.Should().Be(1 + succeeded, "las que chocaron no dejan clave guardada y se pueden reintentar");
+        outcomes.Count(ok => ok).Should().Be(3, "el tope diario es 3 aunque lleguen todos a la vez");
+        (await StateAsync(userId)).Available.Should().Be(9700m);
     }
 
     [SkippableFact]

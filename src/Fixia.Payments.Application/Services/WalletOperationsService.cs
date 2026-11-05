@@ -22,11 +22,16 @@ public interface IWalletOperationsService
 /// Recarga del cliente (GC-482) y retiro del técnico o empresa (GC-483), con la pasarela simulada. Ningún movimiento
 /// es de dinero real. Las dos operaciones exigen <c>Idempotency-Key</c>: repetir la misma petición no recarga ni
 /// retira dos veces. El retiro tiene además un máximo de retiros por día (<see cref="WithdrawalLimits"/>).
+/// <para>
+/// Dos operaciones simultáneas sobre la misma billetera chocan en el bloqueo optimista; en vez de devolver 409 al
+/// usuario, la operación se reintenta desde cero (relee la billetera) hasta <see cref="MaxAttempts"/> veces (GC-501).
+/// </para>
 /// </summary>
 public class WalletOperationsService : IWalletOperationsService
 {
     public const string TopUpOperation = "wallet.top-up";
     public const string WithdrawalOperation = "wallet.withdrawal";
+    public const int MaxAttempts = 10;
 
     private readonly IWalletRepository _wallets;
     private readonly IPaymentGateway _gateway;
@@ -103,21 +108,39 @@ public class WalletOperationsService : IWalletOperationsService
             throw new InvalidQueryException($"Por ahora solo se maneja {Wallet.DefaultCurrency}.");
         Money.RequirePositive(request.Amount);
 
-        // La billetera se asegura fuera de la transacción de la operación.
-        var wallet = await _wallets.GetOrCreateForUserAsync(requester.UserId, currency, Now(), ct);
-
-        return await _idempotency.RunAsync(requester.UserId, operation, key, Hash(request.Amount, currency),
-            async token =>
+        for (var attempt = 1; ; attempt++)
+        {
+            try
             {
-                var (type, reference) = await authorize(wallet, request.Amount, currency, token);
-                var entry = wallet.Apply(type, request.Amount, Now(), reference: reference);
-                await _wallets.AddEntryAsync(entry, token);
-                await _unitOfWork.SaveChangesAsync(token);
+                // La billetera se asegura fuera de la transacción de la operación y se relee en cada intento.
+                var wallet = await _wallets.GetOrCreateForUserAsync(requester.UserId, currency, Now(), ct);
 
-                return new WalletOperationResponse(entry.Id, entry.Type, entry.Amount, wallet.Currency,
-                    wallet.AvailableBalance, wallet.HeldBalance, reference, entry.CreatedAt);
-            }, ct);
+                return await _idempotency.RunAsync(requester.UserId, operation, key, Hash(request.Amount, currency),
+                    async token =>
+                    {
+                        var (type, reference) = await authorize(wallet, request.Amount, currency, token);
+                        var entry = wallet.Apply(type, request.Amount, Now(), reference: reference);
+                        await _wallets.AddEntryAsync(entry, token);
+                        await _unitOfWork.SaveChangesAsync(token);
+
+                        return new WalletOperationResponse(entry.Id, entry.Type, entry.Amount, wallet.Currency,
+                            wallet.AvailableBalance, wallet.HeldBalance, reference, entry.CreatedAt);
+                    }, ct);
+            }
+            catch (Exception ex) when (_unitOfWork.IsConcurrencyConflict(ex))
+            {
+                // La transacción ya se deshizo (incluida la clave de idempotencia): nada quedó a medias.
+                _unitOfWork.DiscardChanges();
+                if (attempt >= MaxAttempts)
+                    throw new WalletBusyException();
+                await Task.Delay(Backoff(attempt), ct);
+            }
+        }
     }
+
+    /// <summary>Espera corta, creciente y con azar, para que las operaciones que chocaron no vuelvan a chocar.</summary>
+    private static TimeSpan Backoff(int attempt) =>
+        TimeSpan.FromMilliseconds(Random.Shared.Next(5, 25) * attempt);
 
     /// <summary>Huella del cuerpo normalizado: 50000, 50000.0 y 50000.00 son el mismo pedido.</summary>
     private static string Hash(decimal amount, string currency) =>
