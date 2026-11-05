@@ -9,18 +9,54 @@ permissions:
   contents: read
 
 jobs:
+  # Pruebas xUnit de la solución .NET 8 (GC-496). Las de PostgreSQL (migraciones, xmin, Outbox con SKIP LOCKED,
+  # idempotencia y retiros simultáneos) corren contra el servicio postgres de abajo vía FIXIA_PAYMENTS_TEST_PG.
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixia
+          POSTGRES_PASSWORD: fixia
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fixia"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      FIXIA_PAYMENTS_TEST_PG: Host=localhost;Port=5432;Username=fixia;Password=fixia;Database=postgres
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
       - uses: actions/checkout@v4
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/setup-dotnet@v4
         with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: maven
-      - name: Run Maven Tests
-        run: mvn -B test
+          dotnet-version: '8.0.x'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: Restaurar
+        run: dotnet restore Fixia.Payments.sln
+      - name: Compilar
+        run: dotnet build Fixia.Payments.sln -c Release --no-restore
+      - name: Pruebas
+        run: >-
+          dotnet test Fixia.Payments.sln -c Release --no-build
+          --logger "trx;LogFileName=results.trx"
+          --results-directory TestResults
+      - name: Publicar resultados
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+          if-no-files-found: ignore
 
   build:
     needs: test
@@ -46,4 +82,3 @@ jobs:
           tags: ${{ steps.meta.outputs.image }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
