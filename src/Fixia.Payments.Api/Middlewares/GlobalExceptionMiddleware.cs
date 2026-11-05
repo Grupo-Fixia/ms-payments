@@ -67,6 +67,14 @@ public class GlobalExceptionMiddleware
                 _logger.LogWarning("Conflicto de billetera: {Message}", exception.Message);
                 break;
 
+            // GC-483: el técnico o empresa ya hizo todos los retiros permitidos en el día.
+            case WithdrawalLimitExceededException limit:
+                statusCode = HttpStatusCode.Conflict;
+                title = "Límite de retiros alcanzado";
+                detail = limit.Message;
+                _logger.LogWarning("Límite diario de retiros alcanzado en {Path}", context.Request.Path);
+                break;
+
             // GC-482/483: la misma Idempotency-Key con otro cuerpo, o la pasarela simulada rechazó.
             case IdempotencyKeyReuseException reuse:
                 statusCode = HttpStatusCode.UnprocessableEntity;

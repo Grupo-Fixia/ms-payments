@@ -1,4 +1,5 @@
 using Fixia.Payments.Domain.Entities;
+using Fixia.Payments.Domain.Enums;
 
 namespace Fixia.Payments.Application.Common.Interfaces;
 
@@ -21,6 +22,13 @@ public interface IWalletRepository
         CancellationToken ct = default);
 
     Task AddEntryAsync(WalletEntry entry, CancellationToken ct = default);
+
+    /// <summary>
+    /// Cuántos movimientos de <paramref name="type"/> tiene la billetera con fecha en [<paramref name="fromUtc"/>,
+    /// <paramref name="toUtc"/>). Lo usa el límite diario de retiros (GC-483).
+    /// </summary>
+    Task<int> CountEntriesAsync(Guid walletId, WalletEntryType type, DateTime fromUtc, DateTime toUtc,
+        CancellationToken ct = default);
 }
 
 /// <summary>Posición en el libro: fecha y id del último movimiento de la página anterior.</summary>
