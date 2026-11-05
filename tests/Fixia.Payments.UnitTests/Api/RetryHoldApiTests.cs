@@ -58,7 +58,9 @@ public class RetryHoldApiTests : IClassFixture<PaymentsApiFactory>
         var response = await ProcessAsync(paymentId, clientId);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await response.Content.ReadFromJsonAsync<PaymentResponse>(Json))!.Status.Should().Be(PaymentStatus.Processing);
+        var retried = (await response.Content.ReadFromJsonAsync<PaymentResponse>(Json))!;
+        retried.Status.Should().Be(PaymentStatus.Processing);
+        retried.FailureReason.Should().BeNull("el reintento exitoso no conserva el motivo del fallo anterior");
         var balance = await _factory.ClientWithToken(_factory.Token(clientId, "ROLE_CLIENT"))
             .GetFromJsonAsync<WalletResponse>("/api/payments/wallets/me", Json);
         balance!.AvailableBalance.Should().Be(29250m);
