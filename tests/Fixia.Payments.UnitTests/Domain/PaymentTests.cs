@@ -100,6 +100,20 @@ public class PaymentTests
     }
 
     [Fact]
+    public void MarkAsProcessing_AfterAFailure_ShouldClearTheFailureReason()
+    {
+        // GC-484: la retención falla por saldo y, tras recargar, el reintento la deja retenida.
+        var payment = new Payment(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 50000m, "COP", PaymentMethod.Wallet);
+        payment.MarkAsFailed("Saldo disponible insuficiente");
+        payment.FailureReason.Should().NotBeNull();
+
+        payment.MarkAsProcessing("HOLD-2");
+
+        payment.Status.Should().Be(PaymentStatus.Processing);
+        payment.FailureReason.Should().BeNull();
+    }
+
+    [Fact]
     public void MarkAsCompleted_WhenProcessing_ShouldUpdateStatusAndRecordTransaction()
     {
         // Arrange

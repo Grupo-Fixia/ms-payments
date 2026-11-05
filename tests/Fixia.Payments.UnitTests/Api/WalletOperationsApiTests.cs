@@ -243,6 +243,64 @@ public class WalletOperationsApiTests : IClassFixture<PaymentsApiFactory>
         balance.HeldBalance.Should().Be(400m);
     }
 
+    [Fact]
+    public async Task Withdrawal_AboveTheDailyLimit_ShouldReturn409AndChangeNothing()
+    {
+        var userId = Guid.NewGuid();
+        var client = await ProfessionalWithBalanceAsync(userId, 10000m);
+        for (var i = 0; i < 3; i++)
+        {
+            (await PostAsync(client, Withdrawals, new { amount = 100 }, $"retiro-{i}")).StatusCode
+                .Should().Be(HttpStatusCode.Created);
+        }
+
+        var fourth = await PostAsync(client, Withdrawals, new { amount = 100 }, "retiro-3");
+
+        fourth.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var problem = await fourth.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("title").GetString().Should().Be("Límite de retiros alcanzado");
+        problem.GetProperty("detail").GetString().Should().Contain("3 retiros");
+        (await BalanceAsync(client)).AvailableBalance.Should().Be(9700m);
+        (await EntriesAsync(userId)).Should().Be(4, "el abono inicial y los tres retiros permitidos");
+    }
+
+    [Fact]
+    public async Task Withdrawal_RetriedWithTheSameKey_ShouldNotUseTheDailyLimit()
+    {
+        var userId = Guid.NewGuid();
+        var client = await ProfessionalWithBalanceAsync(userId, 10000m);
+        for (var i = 0; i < 3; i++)
+            await PostAsync(client, Withdrawals, new { amount = 100 }, $"retiro-{i}");
+
+        var retry = await PostAsync(client, Withdrawals, new { amount = 100 }, "retiro-2");
+
+        retry.StatusCode.Should().Be(HttpStatusCode.Created, "es la misma petición: se repite la respuesta guardada");
+        retry.Headers.GetValues("Idempotent-Replayed").Should().ContainSingle("true");
+        (await BalanceAsync(client)).AvailableBalance.Should().Be(9700m);
+    }
+
+    [Fact]
+    public async Task Withdrawal_FromPreviousDays_ShouldNotCountForToday()
+    {
+        var userId = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentsDbContext>();
+            var wallet = Fixia.Payments.Domain.Entities.Wallet.OpenForUser(userId, DateTime.UtcNow.AddDays(-2));
+            db.Wallets.Add(wallet);
+            db.WalletEntries.Add(wallet.Apply(WalletEntryType.Credit, 10000m, DateTime.UtcNow.AddDays(-2)));
+            for (var i = 0; i < 3; i++)
+                db.WalletEntries.Add(wallet.Apply(WalletEntryType.Withdrawal, 100m, DateTime.UtcNow.AddDays(-2)));
+            await db.SaveChangesAsync();
+        }
+
+        var client = As(userId, "ROLE_PROFESSIONAL");
+        var response = await PostAsync(client, Withdrawals, new { amount = 100 }, Guid.NewGuid().ToString());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await BalanceAsync(client)).AvailableBalance.Should().Be(9600m);
+    }
+
     [Theory]
     [InlineData("ROLE_CLIENT")]
     [InlineData("ROLE_ADMIN")]
