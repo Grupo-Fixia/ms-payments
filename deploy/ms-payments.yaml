@@ -50,6 +50,8 @@ spec:
               value: "https://auth.fixia.com"
             - name: JWT_AUDIENCE
               value: "https://api.fixia.com"
+            - name: USERS_BASE_URL
+              value: "http://ms-users:8080"
           envFrom:
             - secretRef:
                 name: ms-payments-secrets

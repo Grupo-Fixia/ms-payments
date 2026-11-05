@@ -67,6 +67,14 @@ public class GlobalExceptionMiddleware
                 _logger.LogWarning("Conflicto de billetera: {Message}", exception.Message);
                 break;
 
+            // GC-501: la billetera siguió cambiando por operaciones simultáneas incluso después de reintentar.
+            case WalletBusyException busy:
+                statusCode = HttpStatusCode.Conflict;
+                title = "Billetera ocupada";
+                detail = busy.Message;
+                _logger.LogWarning("Billetera ocupada tras reintentar en {Path}", context.Request.Path);
+                break;
+
             // GC-483: el técnico o empresa ya hizo todos los retiros permitidos en el día.
             case WithdrawalLimitExceededException limit:
                 statusCode = HttpStatusCode.Conflict;
