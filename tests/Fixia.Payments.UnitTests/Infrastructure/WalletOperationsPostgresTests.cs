@@ -39,7 +39,8 @@ public class WalletOperationsPostgresTests : IClassFixture<PostgresDatabase>
             new MockPaymentGateway(NullLogger<MockPaymentGateway>.Instance),
             new EfIdempotencyStore(db, TimeProvider.System),
             new UnitOfWork(db),
-            TimeProvider.System);
+            TimeProvider.System,
+            new WithdrawalLimits());
         return await call(service);
     }
 
