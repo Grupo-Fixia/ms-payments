@@ -101,6 +101,9 @@ public class Payment
 
         Status = PaymentStatus.Processing;
         TransactionReference = transactionReference;
+        // Un reintento exitoso tras un fallo (GC-484: retención reintentada después de recargar) no debe conservar el
+        // motivo del fallo anterior.
+        FailureReason = null;
         UpdatedAt = DateTime.UtcNow;
     }
 
