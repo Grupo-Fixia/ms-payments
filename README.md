@@ -80,7 +80,7 @@ Los movimientos los crean la recarga y el retiro (GC-482, GC-483) y los crearán
 - **409** si dos operaciones cambian el mismo pago a la vez (bloqueo optimista con `xmin`) o si la solicitud ya tiene un pago con otros datos.
 - Las rutas `/internal/**` exigen `X-Internal-Api-Key` (`INTERNAL_API_KEY`, comparación en tiempo constante). Sin clave configurada no aceptan ninguna petición.
 - Sin `JWT_PUBLIC_KEY`, en `Development` el servicio arranca con una clave efímera y todas las rutas protegidas responden 401; en cualquier otro ambiente no arranca.
-- No se consulta todavía la revocación de tokens en ms-users (`/internal/tokens/{jti}/status`), como sí hace ms-services.
+- Cada petición con token consulta la revocación en ms-users (`/internal/tokens/{jti}/status`, `USERS_BASE_URL` + `INTERNAL_API_KEY`), como ms-services; si ms-users no responde, se rechaza con 401 (GC-502).
 
 ## ⚙️ Configuración
 
