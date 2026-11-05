@@ -72,6 +72,8 @@ await DatabaseMigrator.ApplyMigrationsAsync(app.Services, app.Configuration,
     app.Services.GetRequiredService<ILogger<Program>>());
 
 // 5. Pipeline HTTP
+// Sin caché en respuestas con saldos y pagos, también las de error (GC-512).
+app.UseMiddleware<NoStoreCacheMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
 // Swagger habilitado tanto en desarrollo como a través de API Gateway
