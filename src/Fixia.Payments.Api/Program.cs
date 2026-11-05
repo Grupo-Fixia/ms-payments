@@ -17,6 +17,10 @@ builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IWalletService, WalletService>();
 builder.Services.AddScoped<ICommissionService, CommissionService>();
 builder.Services.AddScoped<IWalletOperationsService, WalletOperationsService>();
+// Límite de retiros por día (GC-483), configurable en la sección Withdrawals.
+builder.Services.AddSingleton(new WithdrawalLimits(
+    builder.Configuration.GetValue($"{WithdrawalLimits.SectionName}:MaxPerDay", WithdrawalLimits.DefaultMaxPerDay),
+    builder.Configuration.GetValue($"{WithdrawalLimits.SectionName}:TimeZoneId", WithdrawalLimits.DefaultTimeZoneId)!));
 builder.Services.AddScoped<IPaymentRefundService, PaymentRefundService>();
 builder.Services.AddScoped<IServiceEventsHandler, ServiceEventsHandler>();
 

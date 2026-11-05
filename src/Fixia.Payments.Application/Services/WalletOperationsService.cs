@@ -21,7 +21,7 @@ public interface IWalletOperationsService
 /// <summary>
 /// Recarga del cliente (GC-482) y retiro del técnico o empresa (GC-483), con la pasarela simulada. Ningún movimiento
 /// es de dinero real. Las dos operaciones exigen <c>Idempotency-Key</c>: repetir la misma petición no recarga ni
-/// retira dos veces.
+/// retira dos veces. El retiro tiene además un máximo de retiros por día (<see cref="WithdrawalLimits"/>).
 /// </summary>
 public class WalletOperationsService : IWalletOperationsService
 {
@@ -33,15 +33,17 @@ public class WalletOperationsService : IWalletOperationsService
     private readonly IIdempotencyStore _idempotency;
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _clock;
+    private readonly WithdrawalLimits _withdrawalLimits;
 
     public WalletOperationsService(IWalletRepository wallets, IPaymentGateway gateway, IIdempotencyStore idempotency,
-        IUnitOfWork unitOfWork, TimeProvider clock)
+        IUnitOfWork unitOfWork, TimeProvider clock, WithdrawalLimits withdrawalLimits)
     {
         _wallets = wallets;
         _gateway = gateway;
         _idempotency = idempotency;
         _unitOfWork = unitOfWork;
         _clock = clock;
+        _withdrawalLimits = withdrawalLimits;
     }
 
     public Task<IdempotentResult<WalletOperationResponse>> TopUpAsync(Requester requester, string? idempotencyKey,
@@ -71,6 +73,15 @@ public class WalletOperationsService : IWalletOperationsService
             if (wallet.AvailableBalance < amount)
                 throw new InsufficientBalanceException(
                     $"Saldo disponible insuficiente: hay {wallet.AvailableBalance:0.00} {wallet.Currency} y se piden {amount:0.00}.");
+
+            // Tope de retiros por día. Un reintento con la misma Idempotency-Key no llega aquí (se repite la respuesta
+            // guardada), así que no gasta cupo. Dos retiros simultáneos no pasan los dos: el segundo choca con el
+            // bloqueo optimista de la billetera al guardar.
+            var (dayStart, dayEnd) = _withdrawalLimits.DayOf(Now());
+            var today = await _wallets.CountEntriesAsync(wallet.Id, WalletEntryType.Withdrawal, dayStart, dayEnd, token);
+            if (today >= _withdrawalLimits.MaxPerDay)
+                throw new WithdrawalLimitExceededException(
+                    $"Ya hiciste los {_withdrawalLimits.MaxPerDay} retiros permitidos hoy. Podrás retirar de nuevo mañana.");
 
             var approval = await _gateway.ProcessPayoutAsync(wallet.Id, amount, currency, token);
             if (!approval.IsSuccess)

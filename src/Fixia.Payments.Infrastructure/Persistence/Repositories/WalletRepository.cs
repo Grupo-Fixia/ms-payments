@@ -1,5 +1,6 @@
 using Fixia.Payments.Application.Common.Interfaces;
 using Fixia.Payments.Domain.Entities;
+using Fixia.Payments.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -61,4 +62,10 @@ public class WalletRepository : IWalletRepository
 
     public async Task AddEntryAsync(WalletEntry entry, CancellationToken ct = default) =>
         await _context.WalletEntries.AddAsync(entry, ct);
+
+    public Task<int> CountEntriesAsync(Guid walletId, WalletEntryType type, DateTime fromUtc, DateTime toUtc,
+        CancellationToken ct = default) =>
+        _context.WalletEntries.AsNoTracking()
+            .CountAsync(e => e.WalletId == walletId && e.Type == type && e.CreatedAt >= fromUtc && e.CreatedAt < toUtc,
+                ct);
 }
