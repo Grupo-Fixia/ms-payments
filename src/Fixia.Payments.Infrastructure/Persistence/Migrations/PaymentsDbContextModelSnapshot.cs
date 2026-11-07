@@ -22,6 +22,66 @@ namespace Fixia.Payments.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Fixia.Payments.Domain.Entities.AdminAuditEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("action");
+
+                    b.Property<Guid>("AdminId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("admin_id");
+
+                    b.Property<string>("Details")
+                        .HasColumnType("text")
+                        .HasColumnName("details");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("outcome");
+
+                    b.Property<Guid?>("TargetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("target_id");
+
+                    b.Property<string>("TargetType")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("target_type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_admin_audit_events");
+
+                    b.HasIndex("AdminId", "OccurredAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_admin_audit_events_admin");
+
+                    b.HasIndex("OccurredAt", "Id")
+                        .IsDescending()
+                        .HasDatabaseName("ix_admin_audit_events_occurred");
+
+                    b.ToTable("admin_audit_events", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_admin_audit_events_action", "action IN ('PAYMENT_LIST', 'PAYMENT_VIEW', 'PAYMENT_REFUND', 'AUDIT_LIST')");
+
+                            t.HasCheckConstraint("ck_admin_audit_events_outcome", "outcome IN ('OK', 'DENIED', 'CONFLICT', 'NOT_FOUND')");
+
+                            t.HasCheckConstraint("ck_admin_audit_events_target", "(target_type IS NULL AND target_id IS NULL) OR (target_type = 'PAYMENT' AND target_id IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Fixia.Payments.Domain.Entities.CommissionRule", b =>
                 {
                     b.Property<Guid>("Id")

@@ -1,3 +1,4 @@
+using Fixia.Payments.Infrastructure.Persistence.Audit;
 using Fixia.Payments.Application.Common.Interfaces;
 using Fixia.Payments.Infrastructure.Gateways;
 using Fixia.Payments.Infrastructure.Messaging;
@@ -42,6 +43,7 @@ public static class DependencyInjection
                 b.MigrationsAssembly(typeof(PaymentsDbContext).Assembly.FullName)));
 
         services.AddScoped<IPaymentRepository, PaymentRepository>();
+        services.AddScoped<IAdminAuditLog, EfAdminAuditLog>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IPaymentGateway, MockPaymentGateway>();
 

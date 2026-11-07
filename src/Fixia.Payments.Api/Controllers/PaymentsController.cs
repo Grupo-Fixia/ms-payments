@@ -47,9 +47,11 @@ public class PaymentsController : ControllerBase
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
+    public async Task<IActionResult> GetById(Guid id, [FromServices] IAdminPaymentsService admin, CancellationToken ct)
     {
-        var response = await _paymentService.GetByIdAsync(id, User.ToRequester(), ct);
+        var requester = User.ToRequester();
+        var response = await AuditedForAdminAsync(requester, admin, id, null,
+            () => _paymentService.GetByIdAsync(id, requester, ct), ct);
         return Ok(response);
     }
 
@@ -59,10 +61,36 @@ public class PaymentsController : ControllerBase
     [HttpGet("service-request/{serviceRequestId:guid}")]
     [ProducesResponseType(typeof(PaymentResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetByServiceRequestId(Guid serviceRequestId, CancellationToken ct)
+    public async Task<IActionResult> GetByServiceRequestId(Guid serviceRequestId,
+        [FromServices] IAdminPaymentsService admin, CancellationToken ct)
     {
-        var response = await _paymentService.GetByServiceRequestIdAsync(serviceRequestId, User.ToRequester(), ct);
+        var requester = User.ToRequester();
+        var response = await AuditedForAdminAsync(requester, admin, null, new { serviceRequestId },
+            () => _paymentService.GetByServiceRequestIdAsync(serviceRequestId, requester, ct), ct);
         return Ok(response);
+    }
+
+    /// <summary>
+    /// Si quien consulta es un ADMIN, la consulta queda en su registro de acciones (GC-535, contrato admin §4.2), también
+    /// cuando el pago no existe. Para cliente, técnico o empresa no se registra nada.
+    /// </summary>
+    private static async Task<PaymentResponse> AuditedForAdminAsync(Requester requester, IAdminPaymentsService admin,
+        Guid? paymentId, object? details, Func<Task<PaymentResponse>> query, CancellationToken ct)
+    {
+        if (!requester.IsAdmin)
+            return await query();
+
+        try
+        {
+            var response = await query();
+            await admin.RecordViewAsync(requester, response.Id, found: true, details, ct);
+            return response;
+        }
+        catch (Domain.Exceptions.PaymentNotFoundException)
+        {
+            await admin.RecordViewAsync(requester, paymentId, found: false, details, ct);
+            throw;
+        }
     }
 
     /// <summary>
