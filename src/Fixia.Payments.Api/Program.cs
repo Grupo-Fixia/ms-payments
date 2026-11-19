@@ -22,6 +22,7 @@ builder.Services.AddSingleton(new WithdrawalLimits(
     builder.Configuration.GetValue($"{WithdrawalLimits.SectionName}:MaxPerDay", WithdrawalLimits.DefaultMaxPerDay),
     builder.Configuration.GetValue($"{WithdrawalLimits.SectionName}:TimeZoneId", WithdrawalLimits.DefaultTimeZoneId)!));
 builder.Services.AddScoped<IPaymentRefundService, PaymentRefundService>();
+builder.Services.AddScoped<IAdminPaymentsService, AdminPaymentsService>();
 builder.Services.AddScoped<IServiceEventsHandler, ServiceEventsHandler>();
 
 // 2. Seguridad: token de ms-users en /api/payments y clave interna en /internal (GC-477)

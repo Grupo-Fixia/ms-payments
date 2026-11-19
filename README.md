@@ -29,6 +29,8 @@ ms-payments/
 | `GET` | `/api/payments/{id}` | Pagador, prestador o `ROLE_ADMIN` | Obtiene el detalle de un pago y su historial de transacciones. |
 | `GET` | `/api/payments/service-request/{serviceRequestId}` | Pagador, prestador o `ROLE_ADMIN` | Obtiene el pago asociado a una solicitud de servicio. |
 | `POST` | `/api/payments/{id}/refund?reason=` | `ROLE_ADMIN` | Reembolso autorizado con motivo obligatorio e `Idempotency-Key` (GC-487). Con billetera: si está retenido libera el total al cliente; si ya se cobró, lo revierte (prestador y Fixia devuelven, el cliente recibe) o responde 409 sin cambiar nada si no alcanza. Sin billetera: por la pasarela. |
+| `GET` | `/api/payments/admin/payments` | `ROLE_ADMIN` | Pagos para soporte (GC-535): filtros `status`, `holdStatus`, `serviceRequestId` y `userId` (cliente o prestador), cursor y `limit` 1–100. Cada ítem trae `refundable` y `refundKind` (`RELEASE`, `REVERSAL`, `GATEWAY` o `null`). |
+| `GET` | `/api/payments/admin/audit-events` | `ROLE_ADMIN` | Registro de acciones del ADMIN en ms-payments (GC-535): `adminId`, `action`, cursor y `limit`. |
 | `GET` | `/api/payments/wallets/me` | `ROLE_CLIENT`, `ROLE_PROFESSIONAL`, `ROLE_COMPANY` | Saldo disponible y retenido de mi billetera simulada; si no existe, se crea en cero (GC-481). |
 | `GET` | `/api/payments/wallets/me/entries?limit=&cursor=` | `ROLE_CLIENT`, `ROLE_PROFESSIONAL`, `ROLE_COMPANY` | Movimientos de mi billetera, del más reciente al más antiguo; `limit` de 1 a 50 (20 por defecto) y `nextCursor` para la página siguiente (GC-481). |
 | `POST` | `/api/payments/wallets/me/top-ups` | `ROLE_CLIENT` | Recarga simulada (`{"amount": 50000}`) con la cabecera `Idempotency-Key`; 201 con el movimiento y los saldos (GC-482). |
@@ -70,6 +72,14 @@ Los movimientos los crean la recarga y el retiro (GC-482, GC-483) y los crearán
   - dos peticiones simultáneas con la misma clave ejecutan la operación una sola vez.
 - El retiro solo usa el saldo **disponible**; si no alcanza responde **409** antes de llamar a la pasarela.
 - Dos operaciones simultáneas sobre la misma billetera con claves distintas: una gana y la otra responde **409** (bloqueo optimista); se reintenta con su misma clave.
+
+## 🛡️ Registro de acciones del ADMIN (GC-535)
+
+Contrato: `ms-users/docs/contracts/admin.md` §4 y §5. La tabla `admin_audit_events` (migración `AddAdminAuditEvents`) es solo de inserción y guarda quién, qué acción (`PAYMENT_LIST`, `PAYMENT_VIEW`, `PAYMENT_REFUND`, `AUDIT_LIST`), sobre qué pago y con qué resultado (`OK`, `DENIED`, `CONFLICT`, `NOT_FOUND`).
+
+- El reembolso exitoso se registra en la **misma transacción** que el dinero: si se revierte, no queda registro `OK`.
+- Un reembolso fallido (404, 402 o 409) se registra aparte, con su contexto propio, para no arrastrar nada de la operación revertida. Los 400 y 422 no se registran, y una repetición idempotente tampoco.
+- Las consultas de un pago (`GET /api/payments/{id}` y `/service-request/{id}`) se registran solo si quien consulta es ADMIN.
 
 ## 🔐 Seguridad (GC-477)
 

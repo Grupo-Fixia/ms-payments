@@ -16,6 +16,7 @@ public class PaymentsDbContext : DbContext
     public DbSet<CommissionRule> CommissionRules => Set<CommissionRule>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
+    public DbSet<AdminAuditEvent> AdminAuditEvents => Set<AdminAuditEvent>();
 
     /// <summary>Id fijo de la cuenta de Fixia sembrada por la migración de GC-480.</summary>
     public static readonly Guid PlatformWalletId = Guid.Parse("00000000-0000-0000-0000-0000000f1a10");
@@ -328,6 +329,39 @@ public class PaymentsDbContext : DbContext
             entity.Property(e => e.EventId).HasColumnName("event_id").ValueGeneratedNever();
             entity.Property(e => e.EventType).HasColumnName("event_type").HasMaxLength(60).IsRequired();
             entity.Property(e => e.ProcessedAt).HasColumnName("processed_at").IsRequired();
+        });
+
+        // Registro de acciones del ADMIN (GC-535, contrato admin §5): solo inserción.
+        modelBuilder.Entity<AdminAuditEvent>(entity =>
+        {
+            entity.ToTable("admin_audit_events", t =>
+            {
+                t.HasCheckConstraint("ck_admin_audit_events_action",
+                    "action IN ('PAYMENT_LIST', 'PAYMENT_VIEW', 'PAYMENT_REFUND', 'AUDIT_LIST')");
+                t.HasCheckConstraint("ck_admin_audit_events_outcome",
+                    "outcome IN ('OK', 'DENIED', 'CONFLICT', 'NOT_FOUND')");
+                t.HasCheckConstraint("ck_admin_audit_events_target",
+                    "(target_type IS NULL AND target_id IS NULL) OR (target_type = 'PAYMENT' AND target_id IS NOT NULL)");
+            });
+
+            entity.HasKey(e => e.Id).HasName("pk_admin_audit_events");
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(e => e.AdminId).HasColumnName("admin_id").IsRequired();
+            entity.Property(e => e.Action).HasColumnName("action").HasConversion<string>().HasMaxLength(30)
+                .IsRequired();
+            entity.Property(e => e.TargetType).HasColumnName("target_type").HasMaxLength(20);
+            entity.Property(e => e.TargetId).HasColumnName("target_id");
+            entity.Property(e => e.Details).HasColumnName("details");
+            entity.Property(e => e.Outcome).HasColumnName("outcome").HasConversion<string>().HasMaxLength(20)
+                .IsRequired();
+            entity.Property(e => e.OccurredAt).HasColumnName("occurred_at").IsRequired();
+
+            entity.HasIndex(e => new { e.OccurredAt, e.Id })
+                .IsDescending(true, true)
+                .HasDatabaseName("ix_admin_audit_events_occurred");
+            entity.HasIndex(e => new { e.AdminId, e.OccurredAt })
+                .IsDescending(false, true)
+                .HasDatabaseName("ix_admin_audit_events_admin");
         });
     }
 }

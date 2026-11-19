@@ -42,11 +42,17 @@ public class PaymentRefundService : IPaymentRefundService
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _clock;
     private readonly ILogger<PaymentRefundService> _logger;
+    private readonly IAdminAuditLog? _audit;
 
+    /// <param name="audit">
+    /// Registro de acciones del ADMIN (GC-535). Opcional para que las pruebas que solo miran el dinero no lo necesiten;
+    /// la API siempre lo inyecta.
+    /// </param>
     public PaymentRefundService(IPaymentRepository payments, IWalletRepository wallets, IPaymentGateway gateway,
         IBusinessEventOutbox outbox, IIdempotencyStore idempotency, IUnitOfWork unitOfWork, TimeProvider clock,
-        ILogger<PaymentRefundService> logger)
+        ILogger<PaymentRefundService> logger, IAdminAuditLog? audit = null)
     {
+        _audit = audit;
         _payments = payments;
         _wallets = wallets;
         _gateway = gateway;
@@ -69,6 +75,32 @@ public class PaymentRefundService : IPaymentRefundService
             throw new InvalidQueryException($"El motivo admite como máximo {MaxReasonLength} caracteres.");
         var key = IdempotencyKeys.Validate(idempotencyKey);
 
+        try
+        {
+            return await RunRefundAsync(paymentId, requester, cleanReason, key, ct);
+        }
+        catch (Exception ex) when (_audit is not null && FailedOutcome(ex) is { } outcome)
+        {
+            // La transacción del reembolso ya se revirtió: el intento fallido se guarda aparte (GC-535, §5).
+            await _audit.RecordAsync(requester.UserId, AdminAction.PAYMENT_REFUND, paymentId,
+                new { reason = cleanReason, idempotencyKey = key }, outcome, CancellationToken.None);
+            throw;
+        }
+    }
+
+    /// <summary>Resultado que se registra si el reembolso falla; <c>null</c> si el error no se registra (400, 422).</summary>
+    private static AdminAuditOutcome? FailedOutcome(Exception ex) => ex switch
+    {
+        PaymentNotFoundException => AdminAuditOutcome.NOT_FOUND,
+        GatewayRejectedException or PaymentAccessDeniedException => AdminAuditOutcome.DENIED,
+        InvalidPaymentStatusException or PaymentConflictException or InsufficientBalanceException
+            or WalletBusyException => AdminAuditOutcome.CONFLICT,
+        _ => null
+    };
+
+    private async Task<IdempotentResult<PaymentResponse>> RunRefundAsync(Guid paymentId, Requester requester,
+        string cleanReason, string key, CancellationToken ct)
+    {
         return await _idempotency.RunAsync(requester.UserId, Operation, key,
             IdempotencyKeys.Hash($"{paymentId:N}|{cleanReason}"),
             async token =>
@@ -83,6 +115,10 @@ public class PaymentRefundService : IPaymentRefundService
 
                 _payments.Update(payment);
                 await _outbox.EnqueueAsync(PaymentEvents.PaymentRefunded(payment, actor, reference, cleanReason, kind), token);
+                // Mismo SaveChanges que el reembolso: o quedan los dos o ninguno. Una repetición idempotente no pasa
+                // por aquí, así que no duplica el registro.
+                _audit?.Stage(requester.UserId, AdminAction.PAYMENT_REFUND, payment.Id,
+                    new { reason = cleanReason, kind, idempotencyKey = key }, AdminAuditOutcome.OK);
                 await _unitOfWork.SaveChangesAsync(token);
 
                 _logger.LogInformation("Pago '{PaymentId}' reembolsado ({Kind}).", payment.Id, kind);
