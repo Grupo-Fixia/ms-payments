@@ -22,6 +22,7 @@ builder.Services.AddSingleton(new WithdrawalLimits(
     builder.Configuration.GetValue($"{WithdrawalLimits.SectionName}:MaxPerDay", WithdrawalLimits.DefaultMaxPerDay),
     builder.Configuration.GetValue($"{WithdrawalLimits.SectionName}:TimeZoneId", WithdrawalLimits.DefaultTimeZoneId)!));
 builder.Services.AddScoped<IPaymentRefundService, PaymentRefundService>();
+builder.Services.AddScoped<IAdminPaymentsService, AdminPaymentsService>();
 builder.Services.AddScoped<IServiceEventsHandler, ServiceEventsHandler>();
 
 // 2. Seguridad: token de ms-users en /api/payments y clave interna en /internal (GC-477)
@@ -72,6 +73,8 @@ await DatabaseMigrator.ApplyMigrationsAsync(app.Services, app.Configuration,
     app.Services.GetRequiredService<ILogger<Program>>());
 
 // 5. Pipeline HTTP
+// Sin caché en respuestas con saldos y pagos, también las de error (GC-512).
+app.UseMiddleware<NoStoreCacheMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
 // Swagger habilitado tanto en desarrollo como a través de API Gateway

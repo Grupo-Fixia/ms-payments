@@ -20,6 +20,7 @@ public static class SecuritySetup
     public const string DefaultIssuer = "https://auth.fixia.com";
     public const string DefaultAudience = "https://api.fixia.com";
     public static readonly TimeSpan ClockSkew = TimeSpan.FromSeconds(5);
+    public const string JtiClaim = "jti";
 
     public static IServiceCollection AddFixiaSecurity(this IServiceCollection services, IConfiguration configuration,
         IHostEnvironment environment)
@@ -50,12 +51,39 @@ public static class SecuritySetup
                 };
                 options.Events = new JwtBearerEvents
                 {
-                    OnTokenValidated = context =>
+                    OnTokenValidated = async context =>
                     {
                         var subject = context.Principal?.FindFirst(RequesterExtensions.SubjectClaim)?.Value;
                         if (!RequesterExtensions.TryParseSubject(subject, out _))
+                        {
                             context.Fail("El sub del token no tiene la forma usr_<uuid>");
-                        return Task.CompletedTask;
+                            return;
+                        }
+
+                        // GC-502: un token cerrado con logout no vale, igual que en ms-users y ms-services. Sin jti no
+                        // se puede comprobar (los tokens de ms-users siempre lo traen). Si ms-users no responde, se
+                        // rechaza: falla cerrado.
+                        var jti = context.Principal?.FindFirst(JtiClaim)?.Value;
+                        if (string.IsNullOrWhiteSpace(jti))
+                        {
+                            context.Fail("Token revocado");
+                            return;
+                        }
+
+                        var checker = context.HttpContext.RequestServices.GetRequiredService<ITokenRevocationChecker>();
+                        try
+                        {
+                            if (await checker.IsRevokedAsync(jti, context.HttpContext.RequestAborted))
+                                context.Fail("Token revocado");
+                        }
+                        catch (TokenRevocationCheckException ex)
+                        {
+                            context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                                .CreateLogger(typeof(SecuritySetup))
+                                .LogWarning("No se pudo comprobar la revocación de un token; se rechaza la petición ({Error})",
+                                    ex.GetType().Name);
+                            context.Fail("No se pudo verificar la revocación del token");
+                        }
                     },
                     OnChallenge = async context =>
                     {
@@ -68,6 +96,16 @@ public static class SecuritySetup
             .AddScheme<InternalApiKeyOptions, InternalApiKeyAuthenticationHandler>(
                 InternalApiKeyAuthenticationHandler.SchemeName,
                 options => options.ApiKey = Value(configuration, "INTERNAL_API_KEY"));
+
+        // Revocación de tokens en ms-users (GC-502).
+        var usersBaseUrl = Value(configuration, "USERS_BASE_URL") ?? UsersTokenRevocationChecker.DefaultBaseUrl;
+        var internalApiKey = Value(configuration, "INTERNAL_API_KEY") ?? string.Empty;
+        services.AddHttpClient<ITokenRevocationChecker, UsersTokenRevocationChecker>(client =>
+        {
+            client.BaseAddress = new Uri(usersBaseUrl);
+            client.Timeout = UsersTokenRevocationChecker.Timeout;
+            client.DefaultRequestHeaders.Add(InternalApiKeyAuthenticationHandler.HeaderName, internalApiKey);
+        });
 
         services.AddAuthorization(options =>
         {

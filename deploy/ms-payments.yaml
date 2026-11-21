@@ -7,6 +7,11 @@ metadata:
     app: ms-payments
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: ms-payments
@@ -50,6 +55,8 @@ spec:
               value: "https://auth.fixia.com"
             - name: JWT_AUDIENCE
               value: "https://api.fixia.com"
+            - name: USERS_BASE_URL
+              value: "http://ms-users:8080"
           envFrom:
             - secretRef:
                 name: ms-payments-secrets
