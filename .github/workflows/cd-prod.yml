@@ -1,0 +1,37 @@
+name: cd-prod
+on:
+  workflow_run:
+    workflows: ["ci-prod"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-prod-ms-payments
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: [self-hosted, prod]
+    env:
+      KUBECONFIG: /home/estudiante/.kube/deployer-prod.yaml
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Deploy application to Production
+        run: |
+          export IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:${HEAD_SHA:0:12}"
+          echo "Desplegando en Producción la imagen: $IMAGE"
+          envsubst '${IMAGE}' < deploy/ms-payments-prod.yaml | kubectl apply -f -
+
+      - name: Wait for rollout
+        run: kubectl -n apps rollout status deployment/ms-payments --timeout=420s
