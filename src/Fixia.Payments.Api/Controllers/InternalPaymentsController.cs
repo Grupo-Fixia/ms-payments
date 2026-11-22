@@ -16,10 +16,12 @@ namespace Fixia.Payments.Api.Controllers;
 public class InternalPaymentsController : ControllerBase
 {
     private readonly IPaymentService _paymentService;
+    private readonly IHeldPaymentsService _heldPayments;
 
-    public InternalPaymentsController(IPaymentService paymentService)
+    public InternalPaymentsController(IPaymentService paymentService, IHeldPaymentsService heldPayments)
     {
         _paymentService = paymentService;
+        _heldPayments = heldPayments;
     }
 
     /// <summary>
@@ -37,5 +39,18 @@ public class InternalPaymentsController : ControllerBase
         return result.Created
             ? Created($"/api/payments/{result.Payment.Id}", result.Payment)
             : Ok(result.Payment);
+    }
+
+    /// <summary>
+    /// Solicitudes con dinero del prestador todavía retenido o por retener (GC-524, contrato de empresas §6.2). ms-users
+    /// la consulta antes de dejar que un técnico se desvincule de su empresa. Hasta 500 solicitudes por consulta.
+    /// </summary>
+    [HttpPost("held")]
+    [ProducesResponseType(typeof(HeldPaymentsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<HeldPaymentsResponse>> Held([FromBody] HeldPaymentsRequest request,
+        CancellationToken ct)
+    {
+        return Ok(await _heldPayments.HeldAsync(request, ct));
     }
 }

@@ -139,6 +139,23 @@ public class AdminAuditPostgresTests : IClassFixture<PostgresDatabase>
         events[0].Details.Should().NotContain("kind");
     }
 
+    /// <summary>GC-524: la consulta de dinero retenido (con UNION) se traduce a SQL de PostgreSQL.</summary>
+    [SkippableFact]
+    public async Task HeldServiceRequests_ShouldTranslateToSql()
+    {
+        RequireDatabase();
+        var providerId = Guid.NewGuid();
+        var held = await GivenPaymentAsync(Guid.NewGuid(), providerId, captured: false);
+        var captured = await GivenPaymentAsync(Guid.NewGuid(), providerId, captured: true);
+        var otherProvider = await GivenPaymentAsync(Guid.NewGuid(), Guid.NewGuid(), captured: false);
+
+        await using var db = _database.NewContext();
+        var ids = await new PaymentRepository(db).ListHeldServiceRequestIdsAsync(providerId,
+            new[] { held.ServiceRequestId, captured.ServiceRequestId, otherProvider.ServiceRequestId, Guid.NewGuid() });
+
+        ids.Should().Equal(held.ServiceRequestId);
+    }
+
     [SkippableFact]
     public async Task AdminList_ShouldTranslateFiltersAndCursorToSql()
     {
