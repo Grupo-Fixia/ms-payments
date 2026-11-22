@@ -25,6 +25,7 @@ ms-payments/
 | Método | Endpoint | Quién | Descripción |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/internal/payments` | Otro microservicio (`X-Internal-Api-Key`) | Registra el pago de una solicitud de servicio. Idempotente: el mismo pedido repetido responde 200 con el pago existente; otros datos para la misma solicitud, 409. No pasa por Traefik. |
+| `POST` | `/internal/payments/held` | ms-users (`X-Internal-Api-Key`) | `{providerId, serviceRequestIds}` → `{heldServiceRequestIds}`: de esas solicitudes, las que tienen un pago por billetera del prestador por retener (`Pending`) o retenido (`Held`). ms-users la consulta antes de desvincular a un técnico de su empresa (GC-524, contrato de empresas §6.2). Hasta 500 solicitudes; 400 si falta `providerId`, hay un id vacío o son más de 500. |
 | `POST` | `/api/payments/{id}/process` | El pagador del pago | Sin billetera: procesa el cobro por la pasarela. Con billetera: **reintenta la retención** que falló por saldo, después de recargar (GC-484); si sigue sin alcanzar, 409. |
 | `GET` | `/api/payments/{id}` | Pagador, prestador o `ROLE_ADMIN` | Obtiene el detalle de un pago y su historial de transacciones. |
 | `GET` | `/api/payments/service-request/{serviceRequestId}` | Pagador, prestador o `ROLE_ADMIN` | Obtiene el pago asociado a una solicitud de servicio. |

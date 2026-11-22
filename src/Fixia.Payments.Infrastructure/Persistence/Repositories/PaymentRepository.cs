@@ -65,6 +65,16 @@ public class PaymentRepository : IPaymentRepository
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<Guid>> ListHeldServiceRequestIdsAsync(Guid providerId,
+        IReadOnlyCollection<Guid> serviceRequestIds, CancellationToken ct = default)
+    {
+        var query = _context.Payments.AsNoTracking()
+            .Where(p => p.ProviderId == providerId && serviceRequestIds.Contains(p.ServiceRequestId));
+        var pending = WhereHoldStatus(query, WalletHoldStatus.Pending).Select(p => p.ServiceRequestId);
+        var held = WhereHoldStatus(query, WalletHoldStatus.Held).Select(p => p.ServiceRequestId);
+        return await pending.Union(held).OrderBy(id => id).ToListAsync(ct);
+    }
+
     /// <summary>El mismo criterio que <c>PaymentMappings.HoldStatusOf</c>, traducido a SQL.</summary>
     private static IQueryable<Payment> WhereHoldStatus(IQueryable<Payment> query, WalletHoldStatus hold)
     {

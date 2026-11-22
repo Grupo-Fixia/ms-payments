@@ -17,6 +17,13 @@ public interface IPaymentRepository
     /// </summary>
     Task<IReadOnlyList<Payment>> ListForAdminAsync(AdminPaymentFilter filter, AdminListPosition? after, int take,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// De <paramref name="serviceRequestIds"/>, las que tienen un pago del prestador con la retención pendiente o hecha
+    /// (GC-524, contrato de empresas §6.2).
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ListHeldServiceRequestIdsAsync(Guid providerId, IReadOnlyCollection<Guid> serviceRequestIds,
+        CancellationToken ct = default);
 }
 
 /// <summary>Filtros opcionales de la lista de pagos del ADMIN (contrato admin §4.1).</summary>
