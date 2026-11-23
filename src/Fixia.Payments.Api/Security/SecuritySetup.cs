@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Fixia.Payments.Api.Security;
@@ -61,8 +62,8 @@ public static class SecuritySetup
                         }
 
                         // GC-502: un token cerrado con logout no vale, igual que en ms-users y ms-services. Sin jti no
-                        // se puede comprobar (los tokens de ms-users siempre lo traen). Si ms-users no responde, se
-                        // rechaza: falla cerrado.
+                        // se puede comprobar (los tokens de ms-users siempre lo traen). Desde GC-547 decide la lista local de
+                        // revocados; si no está al día, se rechaza: falla cerrado.
                         var jti = context.Principal?.FindFirst(JtiClaim)?.Value;
                         if (string.IsNullOrWhiteSpace(jti))
                         {
@@ -97,15 +98,16 @@ public static class SecuritySetup
                 InternalApiKeyAuthenticationHandler.SchemeName,
                 options => options.ApiKey = Value(configuration, "INTERNAL_API_KEY"));
 
-        // Revocación de tokens en ms-users (GC-502).
-        var usersBaseUrl = Value(configuration, "USERS_BASE_URL") ?? UsersTokenRevocationChecker.DefaultBaseUrl;
-        var internalApiKey = Value(configuration, "INTERNAL_API_KEY") ?? string.Empty;
-        services.AddHttpClient<ITokenRevocationChecker, UsersTokenRevocationChecker>(client =>
+        // Revocación de tokens (GC-502) sin llamar a ms-users (GC-547): lista local alimentada por sesion.revocada.
+        services.Configure<SessionRevocationOptions>(configuration.GetSection(SessionRevocationOptions.SectionName));
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<RevocationList>();
+        services.AddSingleton<ITokenRevocationChecker, ReplicatedTokenRevocationChecker>();
+        if (configuration.GetValue(
+                $"{SessionRevocationOptions.SectionName}:{nameof(SessionRevocationOptions.ConsumerEnabled)}", true))
         {
-            client.BaseAddress = new Uri(usersBaseUrl);
-            client.Timeout = UsersTokenRevocationChecker.Timeout;
-            client.DefaultRequestHeaders.Add(InternalApiKeyAuthenticationHandler.HeaderName, internalApiKey);
-        });
+            services.AddHostedService<SessionRevocationConsumer>();
+        }
 
         services.AddAuthorization(options =>
         {
