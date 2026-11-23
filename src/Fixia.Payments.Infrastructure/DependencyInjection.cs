@@ -70,6 +70,15 @@ public static class DependencyInjection
             services.AddHostedService<ServiceEventsConsumer>();
         }
 
+        // GC-547: estado de retención replicado para ms-users (pago.retencion), en lugar de /internal/payments/held.
+        services.Configure<ReplicatedStatesOptions>(configuration.GetSection(ReplicatedStatesOptions.SectionName));
+        services.AddSingleton<HeldServicesStatePublisher>();
+        if (configuration.GetValue(
+                $"{ReplicatedStatesOptions.SectionName}:{nameof(ReplicatedStatesOptions.PublisherEnabled)}", true))
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<HeldServicesStatePublisher>());
+        }
+
         return services;
     }
 }

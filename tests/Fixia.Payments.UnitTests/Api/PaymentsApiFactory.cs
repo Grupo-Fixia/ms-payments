@@ -39,6 +39,8 @@ public sealed class PaymentsApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("INTERNAL_API_KEY", InternalApiKey);
         builder.UseSetting("Outbox:RelayEnabled", "false");
         builder.UseSetting("ServiceEvents:ConsumerEnabled", "false");
+        builder.UseSetting("SessionRevocations:ConsumerEnabled", "false");
+        builder.UseSetting("ReplicatedStates:PublisherEnabled", "false");
 
         builder.ConfigureTestServices(services =>
         {
