@@ -20,6 +20,12 @@ public sealed class ServiceEventsOptions
 
     /// <summary>Espera antes de reintentar un mensaje cuyo efecto no se pudo guardar (por ejemplo, base caída).</summary>
     public int RetryDelayMilliseconds { get; set; } = 5000;
+
+    /// <summary>
+    /// Intentos de un mismo mensaje antes de apartarlo y seguir con el siguiente. Sin este límite, un mensaje que siempre
+    /// falla deja la partición (y con un solo hilo, todo el consumidor) detenido: no se crean ni se cobran pagos.
+    /// </summary>
+    public int MaxAttempts { get; set; } = 5;
 }
 
 /// <summary>
@@ -34,6 +40,8 @@ public sealed class ServiceEventsConsumer : BackgroundService
     private readonly ServiceEventsOptions _options;
     private readonly string _bootstrapServers;
     private readonly ILogger<ServiceEventsConsumer> _logger;
+    private TopicPartitionOffset? _failingOffset;
+    private int _failedAttempts;
 
     public ServiceEventsConsumer(IServiceScopeFactory scopeFactory, IConfiguration configuration,
         IOptions<ServiceEventsOptions> options, ILogger<ServiceEventsConsumer> logger)
@@ -98,6 +106,40 @@ public sealed class ServiceEventsConsumer : BackgroundService
         }
     }
 
+    /// <summary>Cuenta un fallo del mensaje; devuelve <c>false</c> cuando ya no quedan intentos.</summary>
+    private bool RegisterFailure(TopicPartitionOffset offset)
+    {
+        if (_failingOffset is null || !_failingOffset.Equals(offset))
+        {
+            _failingOffset = offset;
+            _failedAttempts = 0;
+        }
+
+        _failedAttempts++;
+        return _failedAttempts < Math.Max(1, _options.MaxAttempts);
+    }
+
+    /// <summary>
+    /// Base caída o sin conexión: se reintenta sin límite, porque apartar el mensaje perdería el pago. Lo demás (un dato
+    /// que falta, una regla del dominio) no se arregla reintentando.
+    /// </summary>
+    private static bool IsTransient(Exception ex)
+    {
+        for (var current = ex; current != null; current = current.InnerException)
+        {
+            if (current is Npgsql.NpgsqlException { IsTransient: true } or TimeoutException)
+                return true;
+        }
+
+        return false;
+    }
+
+    private void ResetFailures()
+    {
+        _failingOffset = null;
+        _failedAttempts = 0;
+    }
+
     private async Task ProcessAsync(IConsumer<string, string> consumer, ConsumeResult<string, string> result,
         CancellationToken ct)
     {
@@ -121,10 +163,25 @@ public sealed class ServiceEventsConsumer : BackgroundService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "No se pudo aplicar el mensaje {TopicPartitionOffset}; se reintenta.",
-                result.TopicPartitionOffset);
+            if (!IsTransient(ex) && !RegisterFailure(result.TopicPartitionOffset))
+            {
+                // Se aparta para no detener los pagos de todos los demás servicios. El offset queda en el log para
+                // reprocesarlo a mano una vez corregida la causa (processed_events evita aplicarlo dos veces).
+                _logger.LogError(ex,
+                    "El mensaje {TopicPartitionOffset} falló {Attempts} veces; se aparta y se continúa con el siguiente.",
+                    result.TopicPartitionOffset, _options.MaxAttempts);
+                consumer.Commit(result);
+                ResetFailures();
+                return;
+            }
+
+            _logger.LogWarning(ex, "No se pudo aplicar el mensaje {TopicPartitionOffset} (intento {Attempt} de {Max}); se reintenta.",
+                result.TopicPartitionOffset, _failedAttempts, _options.MaxAttempts);
             consumer.Seek(result.TopicPartitionOffset);
             await Task.Delay(_options.RetryDelayMilliseconds, ct);
+            return;
         }
+
+        ResetFailures();
     }
 }
