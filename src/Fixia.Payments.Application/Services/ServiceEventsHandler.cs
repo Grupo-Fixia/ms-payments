@@ -129,12 +129,11 @@ public class ServiceEventsHandler : IServiceEventsHandler
             return;
         }
 
-        // Las billeteras se aseguran antes de tocar nada: crear la del prestador guarda por separado.
+        // Las billeteras se aseguran antes de tocar nada: crear la del prestador o la de Fixia guarda por separado.
         var provider = await _wallets.GetOrCreateForUserAsync(payment.ProviderId, payment.Currency, Now(), ct);
         var client = await _wallets.GetByOwnerAsync(payment.ClientId, payment.Currency, ct)
                      ?? throw new InvalidOperationException($"El pago {payment.Id} está retenido pero el cliente no tiene billetera");
-        var platform = await _wallets.GetByOwnerAsync(Wallet.PlatformOwnerId, payment.Currency, ct)
-                       ?? throw new InvalidOperationException("No existe la cuenta de Fixia (la siembra la migración AddWallets)");
+        var platform = await _wallets.GetOrCreatePlatformAsync(payment.Currency, Now(), ct);
 
         foreach (var entry in WalletSettlement.Capture(payment, client, provider, platform, Now()))
             await _wallets.AddEntryAsync(entry, ct);

@@ -52,9 +52,12 @@ public class Wallet
         return new Wallet(Guid.NewGuid(), userId, WalletOwnerType.User, NormalizeCurrency(currency), now);
     }
 
-    /// <summary>La cuenta de Fixia con un id conocido; solo la usa la migración que la siembra.</summary>
-    public static Wallet Platform(Guid id, DateTime createdAt) =>
-        new(id, PlatformOwnerId, WalletOwnerType.Platform, DefaultCurrency, createdAt);
+    /// <summary>
+    /// La cuenta de Fixia con un id conocido. La siembra la migración; el repositorio la vuelve a crear en cero si
+    /// alguien la borró, para que cobrar al cerrar no quede bloqueado.
+    /// </summary>
+    public static Wallet Platform(Guid id, DateTime createdAt, string currency = DefaultCurrency) =>
+        new(id, PlatformOwnerId, WalletOwnerType.Platform, NormalizeCurrency(currency), createdAt);
 
     /// <summary>
     /// Aplica un movimiento y devuelve la línea del libro con los saldos resultantes. Si el resultado dejaría un saldo
