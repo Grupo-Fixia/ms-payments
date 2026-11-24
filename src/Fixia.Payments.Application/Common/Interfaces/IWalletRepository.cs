@@ -15,6 +15,12 @@ public interface IWalletRepository
     Task<Wallet> GetOrCreateForUserAsync(Guid userId, string currency, DateTime now, CancellationToken ct = default);
 
     /// <summary>
+    /// La cuenta de Fixia en esa moneda. La siembra la migración, pero si no está (por ejemplo, porque se vaciaron las
+    /// tablas sin volver a migrar) la crea en cero y la guarda, en lugar de dejar sin cobrar cada cierre.
+    /// </summary>
+    Task<Wallet> GetOrCreatePlatformAsync(string currency, DateTime now, CancellationToken ct = default);
+
+    /// <summary>
     /// Movimientos del más reciente al más antiguo, a partir de la posición <paramref name="after"/> (excluida).
     /// Devuelve hasta <paramref name="take"/> filas.
     /// </summary>
