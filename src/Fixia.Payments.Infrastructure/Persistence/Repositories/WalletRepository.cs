@@ -25,7 +25,25 @@ public class WalletRepository : IWalletRepository
         if (existing != null)
             return existing;
 
-        var wallet = Wallet.OpenForUser(userId, now, currency);
+        return await AddOrGetExistingAsync(Wallet.OpenForUser(userId, now, currency), ct);
+    }
+
+    public async Task<Wallet> GetOrCreatePlatformAsync(string currency, DateTime now, CancellationToken ct = default)
+    {
+        var existing = await GetByOwnerAsync(Wallet.PlatformOwnerId, currency, ct);
+        if (existing != null)
+            return existing;
+
+        // En COP se recrea con el id de la siembra, así queda igual a una base recién migrada.
+        var id = string.Equals(currency, Wallet.DefaultCurrency, StringComparison.OrdinalIgnoreCase)
+            ? PaymentsDbContext.PlatformWalletId
+            : Guid.NewGuid();
+        return await AddOrGetExistingAsync(Wallet.Platform(id, now, currency), ct);
+    }
+
+    /// <summary>Guarda la billetera nueva; si otra operación la creó al mismo tiempo, devuelve esa.</summary>
+    private async Task<Wallet> AddOrGetExistingAsync(Wallet wallet, CancellationToken ct)
+    {
         _context.Wallets.Add(wallet);
         try
         {
@@ -37,9 +55,9 @@ public class WalletRepository : IWalletRepository
                                                SqlState: PostgresErrorCodes.UniqueViolation
                                            })
         {
-            // Otra petición del mismo usuario la creó al mismo tiempo: se usa esa.
             _context.Entry(wallet).State = EntityState.Detached;
-            return await _context.Wallets.SingleAsync(w => w.OwnerId == userId && w.Currency == currency, ct);
+            return await _context.Wallets.SingleAsync(
+                w => w.OwnerId == wallet.OwnerId && w.Currency == wallet.Currency, ct);
         }
     }
 
