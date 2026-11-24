@@ -75,6 +75,7 @@ await DatabaseMigrator.ApplyMigrationsAsync(app.Services, app.Configuration,
 
 // 5. Pipeline HTTP
 // Sin caché en respuestas con saldos y pagos, también las de error (GC-512).
+app.UseMiddleware<PrometheusMetricsMiddleware>();
 app.UseMiddleware<NoStoreCacheMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
