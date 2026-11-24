@@ -65,6 +65,34 @@ public class PaymentRepository : IPaymentRepository
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<Guid>> ListHeldServiceRequestIdsAsync(Guid providerId,
+        IReadOnlyCollection<Guid> serviceRequestIds, CancellationToken ct = default)
+    {
+        var query = _context.Payments.AsNoTracking()
+            .Where(p => p.ProviderId == providerId && serviceRequestIds.Contains(p.ServiceRequestId));
+        var pending = WhereHoldStatus(query, WalletHoldStatus.Pending).Select(p => p.ServiceRequestId);
+        var held = WhereHoldStatus(query, WalletHoldStatus.Held).Select(p => p.ServiceRequestId);
+        return await pending.Union(held).OrderBy(id => id).ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<HoldState>> ListHoldStatesAsync(CancellationToken ct = default)
+    {
+        var all = _context.Payments.AsNoTracking();
+        var held = await WhereHoldStatus(all, WalletHoldStatus.Pending).Select(p => p.ServiceRequestId)
+            .Union(WhereHoldStatus(all, WalletHoldStatus.Held).Select(p => p.ServiceRequestId))
+            .ToListAsync(ct);
+        var heldSet = held.ToHashSet();
+        var wallet = await all.Where(p => p.Method == PaymentMethod.Wallet && p.BaseAmount != null)
+            .Select(p => new { p.ServiceRequestId, p.ProviderId, p.CreatedAt })
+            .ToListAsync(ct);
+        return wallet
+            .GroupBy(p => p.ServiceRequestId)
+            .Select(group => group.OrderByDescending(p => p.CreatedAt).First())
+            .Select(p => new HoldState(p.ServiceRequestId, p.ProviderId, heldSet.Contains(p.ServiceRequestId)))
+            .OrderBy(state => state.ServiceRequestId)
+            .ToList();
+    }
+
     /// <summary>El mismo criterio que <c>PaymentMappings.HoldStatusOf</c>, traducido a SQL.</summary>
     private static IQueryable<Payment> WhereHoldStatus(IQueryable<Payment> query, WalletHoldStatus hold)
     {
